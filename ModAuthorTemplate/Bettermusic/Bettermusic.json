@@ -1,0 +1,18 @@
+{
+  "musics": [
+    {
+      "id": 90001,
+      "name": "自定义音乐示例",
+      "musicPath": "Music/example.mp3",
+      "lrcPath": "Lyrics/example.lrc",
+      "volume": 0.85
+    },
+    {
+      "id": 12345,
+      "name": "原版音乐外挂歌词示例（请改成真实原版音乐 ID）",
+      "musicPath": "",
+      "lrcPath": "Lyrics/original_12345.lrc",
+      "volume": 1.0
+    }
+  ]
+}
