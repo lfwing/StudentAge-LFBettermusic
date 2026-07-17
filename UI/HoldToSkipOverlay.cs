@@ -3,7 +3,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace LFBetterMusic.UI
+namespace LFBetterAudio.UI
 {
     /// <summary>
     /// 复用原版歌词演出的“长按跳过”控件结构，但使用独立克隆，
@@ -32,7 +32,7 @@ namespace LFBetterMusic.UI
                     owner.group_skip_lyrics.gameObject,
                     owner.group_top,
                     false);
-                _root.name = "BetterMusicHoldToSkip";
+                _root.name = "BetterAudioHoldToSkip";
 
                 RectTransform rect = _root.GetComponent<RectTransform>();
                 if (rect != null)

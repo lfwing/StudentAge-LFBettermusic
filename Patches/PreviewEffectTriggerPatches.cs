@@ -1,7 +1,7 @@
-using LFBetterMusic.Effects;
+using LFBetterAudio.Effects;
 using View.Evt;
 
-namespace LFBetterMusic.Patches
+namespace LFBetterAudio.Patches
 {
     /// <summary>
     /// 三个 Prefix 均由 Plugin 手动精确安装并纳入关键入口保活：

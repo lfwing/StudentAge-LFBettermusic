@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,31 +7,31 @@ using BepInEx;
 using BepInEx.Logging;
 using Effect;
 using HarmonyLib;
-using LFBetterMusic.Assets;
-using LFBetterMusic.Config;
-using LFBetterMusic.Discovery;
-using LFBetterMusic.Effects;
-using LFBetterMusic.Lyrics;
-using LFBetterMusic.Patches;
-using LFBetterMusic.Runtime;
-using LFBetterMusic.Templates;
+using LFBetterAudio.Assets;
+using LFBetterAudio.Config;
+using LFBetterAudio.Discovery;
+using LFBetterAudio.Effects;
+using LFBetterAudio.Timeline;
+using LFBetterAudio.Patches;
+using LFBetterAudio.Runtime;
+using LFBetterAudio.Templates;
 using UnityEngine;
 using View.Evt;
 
-namespace LFBetterMusic
+namespace LFBetterAudio
 {
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public sealed class Plugin : BaseUnityPlugin
     {
-        internal const string PluginGuid = "sa.lf.bettermusicplugins";
-        internal const string PluginName = "lf-更好的音乐演出效果";
-        internal const string PluginVersion = "1.6.2";
+        internal const string PluginGuid = "sa.lf.betteraudio";
+        internal const string PluginName = "LFBetterAudio";
+        internal const string PluginVersion = "1.0.0";
 
         internal static Plugin Instance { get; private set; }
         internal static ManualLogSource Log { get; private set; }
         internal static string TemplateDirectory { get; private set; }
         internal static string RuntimeAssetDirectory { get; private set; }
-        internal static BetterMusicConfigStore ConfigStore { get; private set; }
+        internal static BetterAudioConfigStore ConfigStore { get; private set; }
 
         private const float PatchHealthCheckInterval = 1f;
 
@@ -61,7 +61,7 @@ namespace LFBetterMusic
                 TemplateDirectory = Path.GetFullPath(
                     Path.Combine(Paths.PluginPath, ModAuthorTemplateInstaller.TemplateFolderName));
                 RuntimeAssetDirectory = Path.GetFullPath(
-                    Path.Combine(Paths.CachePath, "LFBetterMusic", "RuntimeAssets"));
+                    Path.Combine(Paths.CachePath, "LFBetterAudio", "RuntimeAssets"));
 
                 bool loadedNormally = true;
                 _harmony = new Harmony(PluginGuid);
@@ -89,7 +89,7 @@ namespace LFBetterMusic
                         if (!BuiltInValidationAssets.IsReady ||
                             !BuiltInValidationAssets.TryGetEntry(
                                 BuiltInValidationAssets.ValidationMusicId,
-                                out BetterMusicEntry validationEntry) ||
+                                out BetterAudioEntry validationEntry) ||
                             validationEntry == null ||
                             validationEntry.Name != "校验音乐")
                         {
@@ -99,16 +99,16 @@ namespace LFBetterMusic
                     });
 
                 loadedNormally &= TryInitialize(
-                    "BetterMusic资源包",
+                    "BetterAudio资源包",
                     LoadMusicPackages);
 
                 loadedNormally &= TryInitialize(
                     "播放控制器",
                     () =>
                     {
-                        if (BetterMusicController.EnsureInstance() == null)
+                        if (BetterAudioController.EnsureInstance() == null)
                         {
-                            throw new InvalidOperationException("无法创建 BetterMusicController。");
+                            throw new InvalidOperationException("无法创建 BetterAudioController。");
                         }
                     });
 
@@ -151,10 +151,10 @@ namespace LFBetterMusic
 
         private void LoadMusicPackages()
         {
-            IReadOnlyList<BetterMusicPackage> packages =
-                BetterMusicPackageDiscovery.DiscoverWorkshopPackages(Paths.GameRootPath);
+            IReadOnlyList<BetterAudioPackage> packages =
+                BetterAudioPackageDiscovery.DiscoverWorkshopPackages(Paths.GameRootPath);
 
-            ConfigStore = BetterMusicConfigStore.LoadAll(packages);
+            ConfigStore = BetterAudioConfigStore.LoadAll(packages);
         }
 
         private bool TryInitialize(string moduleName, Action action)
@@ -167,9 +167,9 @@ namespace LFBetterMusic
             catch (Exception ex)
             {
                 AddStartupIssue($"{moduleName}：{ex.Message}");
-                if (moduleName == "BetterMusic资源包")
+                if (moduleName == "BetterAudio资源包")
                 {
-                    ConfigStore = BetterMusicConfigStore.CreateEmpty();
+                    ConfigStore = BetterAudioConfigStore.CreateEmpty();
                 }
                 return false;
             }
@@ -209,7 +209,7 @@ namespace LFBetterMusic
         {
             string raw = rawEffect == null
                 ? string.Empty
-                : $"；指令={BetterMusicEffectEncoding.Format(rawEffect)}";
+                : $"；指令={BetterAudioEffectEncoding.Format(rawEffect)}";
             LogEffectError((message ?? "未知错误") + raw);
         }
 
@@ -235,8 +235,8 @@ namespace LFBetterMusic
             if (loadedNormally && _startupIssues.Count == 0)
             {
                 Log?.LogInfo(
-                    $"[启动自检成功] BetterMusic {PluginVersion} 全流程自检通过；" +
-                    $"音乐条目={totalMusicCount}，资源包={packageCount}。");
+                    $"[启动自检成功] BetterAudio {PluginVersion} 全流程自检通过；" +
+                    $"音频条目={totalMusicCount}，资源包={packageCount}。");
                 return;
             }
 
@@ -244,7 +244,7 @@ namespace LFBetterMusic
                 ? "存在未明确归类的初始化异常。"
                 : string.Join("；", _startupIssues);
             Log?.LogError(
-                $"[启动自检失败] BetterMusic {PluginVersion} 全流程自检未通过：{detail}");
+                $"[启动自检失败] BetterAudio {PluginVersion} 全流程自检未通过：{detail}");
         }
 
         private static void ValidateLyricsVisualComponents()
@@ -253,7 +253,7 @@ namespace LFBetterMusic
             try
             {
                 probeObject = new GameObject(
-                    "lf-BetterMusicLyricsSelfCheck",
+                    "lf-BetterAudioLyricsSelfCheck",
                     typeof(RectTransform),
                     typeof(CanvasGroup),
                     typeof(UnityEngine.UI.Image),
@@ -273,8 +273,11 @@ namespace LFBetterMusic
 
                 var state = new FloatingLyricsRuntimeState(1, 0, false);
                 state.SetRuntimeSize(4);
-                state.SetRuntimeColor(12);
-                if (state.EffectiveSizeMode != 4 || !state.HasColorOverride)
+                state.SetRuntimeColor(31);
+                var positionLock = new FloatingLyricsPositionLockState();
+                positionLock.Lock(new Vector2(10f, -20f));
+                if (state.EffectiveSizeMode != 4 || !state.HasColorOverride ||
+                    !positionLock.IsLocked)
                 {
                     throw new InvalidOperationException("浮动歌词跨 Talk 状态组件自检失败。");
                 }
@@ -435,10 +438,10 @@ namespace LFBetterMusic
             // 两条路径都验证，防止只修好直接调用却仍在实际 Talk 中 Effect Not Found。
             var directProbe = new List<float> { 1163f, 0f };
             Effector directResult = CommonEvtMgr.GenEffector(directProbe, null, 0, 0);
-            if (!(directResult is EffectorBetterMusic))
+            if (!(directResult is EffectorBetterAudio))
             {
                 throw new InvalidOperationException(
-                    "正常游戏单条 GenEffector 自检失败，1163 未返回 EffectorBetterMusic。");
+                    "正常游戏单条 GenEffector 自检失败，1163 未返回 EffectorBetterAudio。");
             }
 
             var batchProbe = new List<List<float>>
@@ -446,7 +449,7 @@ namespace LFBetterMusic
                 new List<float> { 1163f, 0f }
             };
             Effector batchResult = CommonEvtMgr.GenEffector(batchProbe, null, 0, 0);
-            if (!(batchResult is EffectorBetterMusic))
+            if (!(batchResult is EffectorBetterAudio))
             {
                 throw new InvalidOperationException(
                     "正常游戏批次 GenEffector 自检失败，Talk EFFECT 链仍可能出现 Effect Not Found。");
@@ -462,7 +465,7 @@ namespace LFBetterMusic
 
         }
 
-        // 关键：BetterMusicController 是 DontDestroyOnLoad 独立对象。
+        // 关键：BetterAudioController 是 DontDestroyOnLoad 独立对象。
         // 即使 BaseUnityPlugin 在游戏启动阶段被销毁，它仍会每秒检查并补回关键 EFFECT Patch。
         internal void TickPatchHealthFromPersistentController()
         {
@@ -513,7 +516,7 @@ namespace LFBetterMusic
         private void OnApplicationQuit()
         {
             _applicationQuitting = true;
-            BetterMusicController.Instance?.Shutdown();
+            BetterAudioController.Instance?.Shutdown();
             _harmony?.UnpatchSelf();
         }
 
@@ -528,7 +531,7 @@ namespace LFBetterMusic
                     return;
                 }
 
-                BetterMusicController.Instance?.Shutdown();
+                BetterAudioController.Instance?.Shutdown();
                 _harmony?.UnpatchSelf();
 
                 if (ReferenceEquals(Instance, this))

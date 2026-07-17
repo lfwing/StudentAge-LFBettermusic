@@ -3,7 +3,7 @@ using Config;
 using HarmonyLib;
 using View.Evt;
 
-namespace LFBetterMusic.Preview
+namespace LFBetterAudio.Preview
 {
     internal static class PreviewTalkAccess
     {

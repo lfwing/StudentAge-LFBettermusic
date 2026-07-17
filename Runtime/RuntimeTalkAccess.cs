@@ -2,7 +2,7 @@ using Config;
 using HarmonyLib;
 using View.Evt;
 
-namespace LFBetterMusic.Runtime
+namespace LFBetterAudio.Runtime
 {
     internal static class RuntimeTalkAccess
     {

@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>LFBetterMusicPlugin</id>
+    <version>1.6.2</version>
+    <authors>LFBetterMusicPlugin</authors>
+    <description>Package Description</description>
+    <repository type="git" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.8" />
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="D:\VS2026 project\studentages\BetterMusicPlugin\bin\Debug\net48\LFBetterMusicPlugin.dll" target="lib\net48\LFBetterMusicPlugin.dll" />
+  </files>
+</package>

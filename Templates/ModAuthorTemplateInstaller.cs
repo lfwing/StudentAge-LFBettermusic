@@ -2,15 +2,15 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace LFBetterMusic.Templates
+namespace LFBetterAudio.Templates
 {
     /// <summary>
-    /// 在 BepInEx/plugins/Bettermusic 下维护一份“仅供复制”的 Mod 作者模板。
-    /// 该目录绝不参与 BetterMusic 资源注册，也不是插件 DLL 的强制安装目录。
+    /// 在 BepInEx/plugins/BetterAudio 下维护一份“仅供复制”的 Mod 作者模板。
+    /// 该目录绝不参与 BetterAudio 资源注册，也不是插件 DLL 的强制安装目录。
     /// </summary>
     internal static class ModAuthorTemplateInstaller
     {
-        internal const string TemplateFolderName = "Bettermusic";
+        internal const string TemplateFolderName = "BetterAudio";
 
         private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(false);
 
@@ -22,33 +22,33 @@ namespace LFBetterMusic.Templates
             }
 
             string root = Path.GetFullPath(templateDirectory);
-            string musicDirectory = Path.Combine(root, "Music");
-            string lyricsDirectory = Path.Combine(root, "Lyrics");
+            string audioDirectory = Path.Combine(root, "Audio");
+            string timelineDirectory = Path.Combine(root, "Timeline");
 
             Directory.CreateDirectory(root);
-            Directory.CreateDirectory(musicDirectory);
-            Directory.CreateDirectory(lyricsDirectory);
+            Directory.CreateDirectory(audioDirectory);
+            Directory.CreateDirectory(timelineDirectory);
 
             WriteIfMissing(
-                Path.Combine(root, "Bettermusic.json"),
+                Path.Combine(root, "BetterAudio.json"),
                 CreateTemplateJson());
 
             WriteIfMissing(
-                Path.Combine(musicDirectory, "README.txt"),
-                "把 Mod 自定义音乐文件放在这里。\n" +
-                "Bettermusic.json 中建议使用相对路径，例如：\n" +
-                "  \"musicPath\": \"Music/MySong.mp3\"\n\n" +
+                Path.Combine(audioDirectory, "README.txt"),
+                "把 Mod 自定义音频文件放在这里。\n" +
+                "BetterAudio.json 中建议使用相对路径，例如：\n" +
+                "  \"audioPath\": \"Audio/MyAudio.mp3\"\n\n" +
                 "支持格式取决于游戏当前 ResMgr.LoadAudioAsync / Unity 音频解码能力。\n");
 
             WriteIfMissing(
-                Path.Combine(lyricsDirectory, "example.lrc"),
-                "[00:00.00]第一句示例歌词\n" +
-                "[00:03.50]第二句示例歌词\n" +
-                "[00:07.0]第三句示例歌词\n");
+                Path.Combine(timelineDirectory, "example.lrc"),
+                "[00:00.00]第一条示例时间轴文本\n" +
+                "[00:03.50]第二条示例时间轴文本\n" +
+                "[00:07.0]第三条示例时间轴文本\n");
 
             WriteIfMissing(
-                Path.Combine(lyricsDirectory, "original_12345.lrc"),
-                "[00:00.00]把此文件替换为原版音乐对应的 LRC\n");
+                Path.Combine(timelineDirectory, "original_12345.lrc"),
+                "[00:00.00]把此文件替换为原版音频对应的 Timeline LRC\n");
         }
 
         private static void WriteIfMissing(string path, string content)
@@ -65,20 +65,22 @@ namespace LFBetterMusic.Templates
         {
             return
                 "{\n" +
-                "  \"musics\": [\n" +
+                "  \"audios\": [\n" +
                 "    {\n" +
                 "      \"id\": 90001,\n" +
                 "      \"name\": \"自定义音乐示例\",\n" +
-                "      \"musicPath\": \"Music/example.mp3\",\n" +
-                "      \"lrcPath\": \"Lyrics/example.lrc\",\n" +
-                "      \"volume\": 0.85\n" +
+                "      \"audioPath\": \"Audio/example.mp3\",\n" +
+                "      \"timelinePath\": \"Timeline/example.lrc\",\n" +
+                "      \"volume\": 0.85,\n" +
+                "      \"type\": 1\n" +
                 "    },\n" +
                 "    {\n" +
                 "      \"id\": 12345,\n" +
-                "      \"name\": \"原版音乐外挂歌词示例（请改成真实原版音乐 ID）\",\n" +
-                "      \"musicPath\": \"\",\n" +
-                "      \"lrcPath\": \"Lyrics/original_12345.lrc\",\n" +
-                "      \"volume\": 1.0\n" +
+                "      \"name\": \"原版音频外挂 Timeline 示例（请改成真实原版音频 ID）\",\n" +
+                "      \"audioPath\": \"\",\n" +
+                "      \"timelinePath\": \"Timeline/original_12345.lrc\",\n" +
+                "      \"volume\": 1.0,\n" +
+                "      \"type\": 1\n" +
                 "    }\n" +
                 "  ]\n" +
                 "}\n";

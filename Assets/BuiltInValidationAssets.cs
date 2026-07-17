@@ -2,12 +2,12 @@ using System;
 using System.IO;
 using System.Reflection;
 using System.Text;
-using LFBetterMusic.Config;
+using LFBetterAudio.Config;
 
-namespace LFBetterMusic.Assets
+namespace LFBetterAudio.Assets
 {
     /// <summary>
-    /// 1163001 是代码级保留 ID，不依赖 bettermusic.json。
+    /// 1163001 是代码级保留 ID，不依赖 betteraudio.json。
     /// 授权构建时可把指定 MP3/LRC 作为 EmbeddedResource 打进 DLL；启动后自动释放到 BepInEx cache 下的运行时缓存目录。
     /// 若资源未嵌入，仍会生成原创短校验音与安全占位 LRC，保证 1163001 始终存在。
     /// </summary>
@@ -16,21 +16,21 @@ namespace LFBetterMusic.Assets
         public const int ValidationMusicId = 1163001;
         public const float ValidationVolume = 0.85f;
 
-        private const string EmbeddedMusicResource = "LFBetterMusic.BundledAssets.ValidationMusic.mp3";
-        private const string EmbeddedLyricsResource = "LFBetterMusic.BundledAssets.ValidationLyrics.lrc";
+        private const string EmbeddedAudioResource = "LFBetterAudio.BundledAssets.ValidationAudio.mp3";
+        private const string EmbeddedTimelineResource = "LFBetterAudio.BundledAssets.ValidationTimeline.lrc";
 
-        private const string PreferredMusicFileName = "03.9.1苏芮-跟着感觉走.mp3";
-        private const string PreferredLyricsFileName = "苏芮 - 跟着感觉走.lrc";
-        private const string FallbackMusicFileName = "LFValidation-1163001.wav";
-        private const string FallbackLyricsFileName = "LFValidation-1163001.lrc";
+        private const string PreferredAudioFileName = "03.9.1苏芮-跟着感觉走.mp3";
+        private const string PreferredTimelineFileName = "苏芮 - 跟着感觉走.lrc";
+        private const string FallbackAudioFileName = "LFValidation-1163001.wav";
+        private const string FallbackTimelineFileName = "LFValidation-1163001.lrc";
 
-        private static BetterMusicEntry _entry;
+        private static BetterAudioEntry _entry;
 
-        public static bool UsesEmbeddedMusic { get; private set; }
+        public static bool UsesEmbeddedAudio { get; private set; }
         public static bool IsReady => _entry != null;
-        public static bool UsesEmbeddedLyrics { get; private set; }
-        public static string ActiveMusicPath => _entry?.MusicPath;
-        public static string ActiveLyricsPath => _entry?.LrcPath;
+        public static bool UsesEmbeddedTimeline { get; private set; }
+        public static string ActiveAudioPath => _entry?.AudioPath;
+        public static string ActiveTimelinePath => _entry?.TimelinePath;
 
         public static void Initialize(string runtimeAssetDirectory)
         {
@@ -40,61 +40,63 @@ namespace LFBetterMusic.Assets
             }
 
             string rootDirectory = Path.GetFullPath(runtimeAssetDirectory);
-            string musicDirectory = Path.Combine(rootDirectory, "music");
-            string lyricsDirectory = Path.Combine(rootDirectory, "lyrics");
-            Directory.CreateDirectory(musicDirectory);
-            Directory.CreateDirectory(lyricsDirectory);
+            string audioDirectory = Path.Combine(rootDirectory, "audio");
+            string timelineDirectory = Path.Combine(rootDirectory, "timeline");
+            Directory.CreateDirectory(audioDirectory);
+            Directory.CreateDirectory(timelineDirectory);
 
-            string preferredMusicPath = Path.Combine(musicDirectory, PreferredMusicFileName);
-            string preferredLyricsPath = Path.Combine(lyricsDirectory, PreferredLyricsFileName);
+            string preferredAudioPath = Path.Combine(audioDirectory, PreferredAudioFileName);
+            string preferredTimelinePath = Path.Combine(timelineDirectory, PreferredTimelineFileName);
 
-            UsesEmbeddedMusic = ExtractEmbeddedResource(EmbeddedMusicResource, preferredMusicPath);
-            UsesEmbeddedLyrics = ExtractEmbeddedResource(EmbeddedLyricsResource, preferredLyricsPath);
+            UsesEmbeddedAudio = ExtractEmbeddedResource(EmbeddedAudioResource, preferredAudioPath);
+            UsesEmbeddedTimeline = ExtractEmbeddedResource(EmbeddedTimelineResource, preferredTimelinePath);
 
-            string activeMusicPath;
-            string activeLyricsPath;
+            string activeAudioPath;
+            string activeTimelinePath;
 
-            if (UsesEmbeddedMusic)
+            if (UsesEmbeddedAudio)
             {
-                activeMusicPath = preferredMusicPath;
+                activeAudioPath = preferredAudioPath;
             }
             else
             {
-                activeMusicPath = Path.Combine(musicDirectory, FallbackMusicFileName);
-                EnsureFallbackWave(activeMusicPath);
+                activeAudioPath = Path.Combine(audioDirectory, FallbackAudioFileName);
+                EnsureFallbackWave(activeAudioPath);
             }
 
-            if (UsesEmbeddedLyrics)
+            if (UsesEmbeddedTimeline)
             {
-                activeLyricsPath = preferredLyricsPath;
+                activeTimelinePath = preferredTimelinePath;
             }
             else
             {
-                activeLyricsPath = Path.Combine(lyricsDirectory, FallbackLyricsFileName);
-                EnsureFallbackLrc(activeLyricsPath);
+                activeTimelinePath = Path.Combine(timelineDirectory, FallbackTimelineFileName);
+                EnsureFallbackLrc(activeTimelinePath);
             }
 
-            _entry = new BetterMusicEntry
+            _entry = new BetterAudioEntry
             {
                 Id = ValidationMusicId,
                 Name = "校验音乐",
-                MusicPath = activeMusicPath,
-                LrcPath = activeLyricsPath,
-                Volume = ValidationVolume
+                AudioPath = activeAudioPath,
+                TimelinePath = activeTimelinePath,
+                Volume = ValidationVolume,
+                Type = 1
             };
         }
 
-        public static bool TryGetEntry(int id, out BetterMusicEntry entry)
+        public static bool TryGetEntry(int id, out BetterAudioEntry entry)
         {
             if (id == ValidationMusicId && _entry != null)
             {
-                entry = new BetterMusicEntry
+                entry = new BetterAudioEntry
                 {
                     Id = _entry.Id,
                     Name = _entry.Name,
-                    MusicPath = _entry.MusicPath,
-                    LrcPath = _entry.LrcPath,
-                    Volume = _entry.Volume
+                    AudioPath = _entry.AudioPath,
+                    TimelinePath = _entry.TimelinePath,
+                    Volume = _entry.Volume,
+                    Type = 1
                 };
                 return true;
             }
@@ -128,7 +130,7 @@ namespace LFBetterMusic.Assets
         private static void EnsureFallbackLrc(string path)
         {
             string content =
-                "[00:00.00]LF BetterMusic 校验音乐\n" +
+                "[00:00.00]LF BetterAudio 校验音频\n" +
                 "[00:01.20]内置保留 ID：1163001\n" +
                 "[00:02.60]浮动歌词同步正常\n";
 
