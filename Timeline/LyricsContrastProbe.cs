@@ -1,7 +1,7 @@
 using System.Collections;
 using UnityEngine;
 
-namespace LFBetterMusic.Lyrics
+namespace LFBetterAudio.Timeline
 {
     /// <summary>
     /// 轻量读取歌词区域下方的一小条屏幕像素，用于估算局部背景亮度。

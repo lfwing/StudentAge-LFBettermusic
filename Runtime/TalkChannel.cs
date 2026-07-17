@@ -1,4 +1,4 @@
-namespace LFBetterMusic.Runtime
+namespace LFBetterAudio.Runtime
 {
     public enum TalkChannel
     {

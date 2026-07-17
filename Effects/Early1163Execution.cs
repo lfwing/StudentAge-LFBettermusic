@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Config;
-using LFBetterMusic.Preview;
-using LFBetterMusic.Runtime;
+using LFBetterAudio.Preview;
+using LFBetterAudio.Runtime;
 using View.Evt;
 
-namespace LFBetterMusic.Effects
+namespace LFBetterAudio.Effects
 {
     /// <summary>
     /// 仅用于把已经在文字开始前执行过的同一条 1163 从原版 DoTextEnd EFFECT 链中移除。
@@ -153,7 +153,7 @@ namespace LFBetterMusic.Effects
                 return plan;
             }
 
-            BetterMusicController controller = BetterMusicController.EnsureInstance();
+            BetterAudioController controller = BetterAudioController.EnsureInstance();
             if (controller == null)
             {
                 return plan;
@@ -161,12 +161,12 @@ namespace LFBetterMusic.Effects
 
             foreach (List<float> rawEffect in cfg.effect)
             {
-                bool is1163 = BetterMusicEffectEncoding.TryParse(
+                bool is1163 = BetterAudioEffectEncoding.TryParse(
                     rawEffect,
-                    out BetterMusicEffectRequest request,
+                    out BetterAudioEffectRequest request,
                     out string parseError);
                 if (!is1163 || parseError != null || request == null ||
-                    request.Command != BetterMusicCommandKind.Play)
+                    request.Command != BetterAudioCommandKind.Play)
                 {
                     continue;
                 }
@@ -196,7 +196,7 @@ namespace LFBetterMusic.Effects
                 return;
             }
 
-            BetterMusicController controller = BetterMusicController.EnsureInstance();
+            BetterAudioController controller = BetterAudioController.EnsureInstance();
             if (controller == null)
             {
                 Plugin.LogEffectError("无法创建播放控制器，1163 提前执行失败。");
@@ -239,18 +239,23 @@ namespace LFBetterMusic.Effects
                 return;
             }
 
-            BetterMusicController controller = BetterMusicController.EnsureInstance();
+            BetterAudioController controller = BetterAudioController.EnsureInstance();
             if (controller == null)
             {
                 Plugin.LogEffectError("无法创建播放控制器，1163 指令未执行。");
                 return;
             }
 
+            // 批次确定性：先完整解析，再把音乐/音效播放指令作为第一批执行，
+            // 停止、暂停和恢复等功能性指令作为第二批执行。
+            // 因此同一 Talk 中“播放 + 暂停”无论音频是否命中缓存，都能稳定得到
+            // “完成加载后直接暂停”的结果。
+            var parsedRequests = new List<BetterAudioEffectRequest>();
             foreach (List<float> rawEffect in cfg.effect)
             {
-                bool is1163 = BetterMusicEffectEncoding.TryParse(
+                bool is1163 = BetterAudioEffectEncoding.TryParse(
                     rawEffect,
-                    out BetterMusicEffectRequest request,
+                    out BetterAudioEffectRequest request,
                     out string parseError);
                 if (!is1163)
                 {
@@ -268,11 +273,64 @@ namespace LFBetterMusic.Effects
                     continue;
                 }
 
+                if (request != null)
+                {
+                    parsedRequests.Add(request);
+                }
+            }
+
+            ExecuteRequestBatch(
+                parsedRequests,
+                true,
+                controller,
+                owner,
+                channel,
+                cfg.id,
+                previewAudioCfgMap,
+                previewPersonCfgMap,
+                previewGender);
+
+            ExecuteRequestBatch(
+                parsedRequests,
+                false,
+                controller,
+                owner,
+                channel,
+                cfg.id,
+                previewAudioCfgMap,
+                previewPersonCfgMap,
+                previewGender);
+        }
+
+        private static void ExecuteRequestBatch(
+            IList<BetterAudioEffectRequest> requests,
+            bool playBatch,
+            BetterAudioController controller,
+            Sdk.BaseView owner,
+            TalkChannel channel,
+            int talkId,
+            Dictionary<int, AudioCfg> previewAudioCfgMap,
+            Dictionary<int, PersonCfg> previewPersonCfgMap,
+            GenderDefine previewGender)
+        {
+            if (requests == null || controller == null)
+            {
+                return;
+            }
+
+            foreach (BetterAudioEffectRequest request in requests)
+            {
+                bool isPlay = request.Command == BetterAudioCommandKind.Play;
+                if (isPlay != playBatch)
+                {
+                    continue;
+                }
+
                 controller.ExecuteRequest(
                     request,
                     owner,
                     channel,
-                    cfg.id,
+                    talkId,
                     previewAudioCfgMap,
                     previewPersonCfgMap,
                     previewGender);

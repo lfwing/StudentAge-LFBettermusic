@@ -2,12 +2,12 @@ using System;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
-using LFBetterMusic.Runtime;
+using LFBetterAudio.Runtime;
 using Sdk;
 using UnityEngine;
 using View.Evt;
 
-namespace LFBetterMusic.Patches
+namespace LFBetterAudio.Patches
 {
     /// <summary>
     /// 只在当前 1163 会话确实需要区分自动推进时，才给原版 TimerMgr 回调附加来源标记。
@@ -37,7 +37,7 @@ namespace LFBetterMusic.Patches
                 return;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.ShouldTrackAutomaticAdvance(owner))
             {
                 return;
@@ -72,7 +72,7 @@ namespace LFBetterMusic.Patches
                 return;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.ShouldTrackAutomaticAdvance(owner))
             {
                 owner.OnClickNext();
@@ -127,7 +127,7 @@ namespace LFBetterMusic.Patches
     {
         private static void Prefix(NewTalkView __instance, out bool __state)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             __state = controller != null;
             controller?.BeginAdvance(
                 __instance,
@@ -138,7 +138,7 @@ namespace LFBetterMusic.Patches
         {
             if (__state)
             {
-                BetterMusicController.Instance?.EndAdvance(__instance);
+                BetterAudioController.Instance?.EndAdvance(__instance);
             }
         }
     }
@@ -148,7 +148,7 @@ namespace LFBetterMusic.Patches
     {
         private static void Prefix(PreviewTalkView __instance, out bool __state)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             __state = controller != null;
             controller?.BeginAdvance(__instance, TalkAdvanceOrigin.Manual);
         }
@@ -157,7 +157,7 @@ namespace LFBetterMusic.Patches
         {
             if (__state)
             {
-                BetterMusicController.Instance?.EndAdvance(__instance);
+                BetterAudioController.Instance?.EndAdvance(__instance);
             }
         }
     }
@@ -167,7 +167,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(NewTalkView __instance)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             return controller == null || controller.HandleNextTalkAttempt(__instance);
         }
     }
@@ -177,7 +177,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(PreviewTalkView __instance)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             return controller == null || controller.HandleNextTalkAttempt(__instance);
         }
     }

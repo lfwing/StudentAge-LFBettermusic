@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using GenUI.Talk;
 using TMPro;
@@ -7,7 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.Events;
 using UnityEngine.UI;
 
-namespace LFBetterMusic.Lyrics
+namespace LFBetterAudio.Timeline
 {
     public sealed class FloatingLyricsOverlay
     {
@@ -33,7 +33,7 @@ namespace LFBetterMusic.Lyrics
         private const float SizeMenuWidth = 132f;
         private const float SizeMenuHeight = 178f;
         private const float ColorMenuWidth = 226f;
-        private const float ColorMenuHeight = 184f;
+        private const float ColorMenuHeight = 328f;
 
         private static readonly Color DarkOutlineColor = new Color(0f, 0f, 0f, 0.82f);
         private static readonly Color LightOutlineColor = new Color(1f, 1f, 1f, 0.78f);
@@ -49,6 +49,8 @@ namespace LFBetterMusic.Lyrics
         // 会只剩按钮的灰色底框。图标改为运行时生成的透明 Sprite。
         private static Sprite _settingsIconSprite;
         private static Sprite _restoreIconSprite;
+        private static Sprite _openLockIconSprite;
+        private static Sprite _closedLockIconSprite;
 
         private readonly Vector3[] _worldCorners = new Vector3[4];
         private readonly List<Image> _sizeOptionImages = new List<Image>();
@@ -61,6 +63,7 @@ namespace LFBetterMusic.Lyrics
         private CanvasGroup _canvasGroup;
         private Image _frameBackground;
         private GameObject _toolbarRoot;
+        private Image _lockIconImage;
         private GameObject _secondaryMenuObject;
         private RectTransform _secondaryMenuRect;
         private GameObject _tertiaryMenuObject;
@@ -119,7 +122,7 @@ namespace LFBetterMusic.Lyrics
                 : null;
 
             _root = new GameObject(
-                "BetterMusicFloatingLyrics",
+                "BetterAudioFloatingLyrics",
                 typeof(RectTransform),
                 typeof(LyricsContrastProbe));
             _root.layer = owner.group_top.gameObject.layer;
@@ -132,8 +135,8 @@ namespace LFBetterMusic.Lyrics
             _rect.anchorMax = new Vector2(0.5f, 1f);
             _rect.pivot = new Vector2(0.5f, 1f);
             _rect.sizeDelta = new Vector2(MinimumFrameWidth, 110f);
-            _rect.anchoredPosition = runtimeState.HasCustomPosition
-                ? runtimeState.AnchoredPosition
+            _rect.anchoredPosition = runtimeState.TryGetPreferredPosition(out Vector2 preferredPosition)
+                ? preferredPosition
                 : new Vector2(0f, TargetY);
 
             CreateFrameSurface();
@@ -145,7 +148,8 @@ namespace LFBetterMusic.Lyrics
 
             ApplyStyle(runtimeState.EffectiveSizeMode);
             Clear();
-            ClampFrameToParent(false);
+            RefreshLockIcon();
+            ClampFrameToParent(runtimeState.HasCustomPosition || runtimeState.IsPositionLocked);
         }
 
         public void ApplyStyle(int sizeMode, int colorMode)
@@ -169,7 +173,8 @@ namespace LFBetterMusic.Lyrics
         public void ShowLine(
             LrcLine line,
             string singerName,
-            int colorMode)
+            int colorMode,
+            bool animate = true)
         {
             if (line == null)
             {
@@ -181,14 +186,16 @@ namespace LFBetterMusic.Lyrics
                 line.PrimaryText,
                 line.SecondaryText,
                 singerName,
-                colorMode);
+                colorMode,
+                animate);
         }
 
         public void ShowLine(
             string primaryText,
             string secondaryText,
             string singerName,
-            int colorMode)
+            int colorMode,
+            bool animate = true)
         {
             if (!IsAlive || _prefixText == null || _lyricText == null)
             {
@@ -205,6 +212,11 @@ namespace LFBetterMusic.Lyrics
             string key = prefix + "\u001f" + primaryText + "\u001f" + secondaryText + "\u001f" + colorMode;
             if (key == _currentKey)
             {
+                if (!animate && _canvasGroup != null && _contentRoot != null)
+                {
+                    _canvasGroup.alpha = 1f;
+                    _contentRoot.anchoredPosition = Vector2.zero;
+                }
                 return;
             }
 
@@ -229,14 +241,23 @@ namespace LFBetterMusic.Lyrics
                 _currentLyricBlock,
                 _currentHasSecondLine);
 
-            _canvasGroup.alpha = 0f;
-            _contentRoot.anchoredPosition = new Vector2(0f, StartOffsetY);
-            ClampFrameToParent(_runtimeState != null && _runtimeState.HasCustomPosition);
+            _canvasGroup.alpha = animate ? 0f : 1f;
+            _contentRoot.anchoredPosition = animate
+                ? new Vector2(0f, StartOffsetY)
+                : Vector2.zero;
+            bool persistPosition = _runtimeState != null &&
+                (_runtimeState.HasCustomPosition || _runtimeState.IsPositionLocked);
+            ClampFrameToParent(persistPosition);
+
+            if (_runtimeState != null && _runtimeState.IsPositionLocked)
+            {
+                ShowSelectionFrame();
+            }
         }
 
         public void ShowLine(string text)
         {
-            ShowLine(text, string.Empty, string.Empty, -1);
+            ShowLine(text, string.Empty, string.Empty, -1, true);
         }
 
         public void Clear()
@@ -267,7 +288,7 @@ namespace LFBetterMusic.Lyrics
                 _frameBackground.raycastTarget = false;
             }
 
-            HideSelectionFrame();
+            HideSelectionFrame(true);
         }
 
         public void Tick(float unscaledDeltaTime)
@@ -280,6 +301,7 @@ namespace LFBetterMusic.Lyrics
             // 二级/三级菜单不会锁住选框。只要玩家在设定时间内没有新的点击、
             // 拖动或进入菜单项，灰框、工具栏和全部菜单会一起隐藏。
             if (_frameVisible && !_isDragging &&
+                !IsPositionLocked &&
                 Time.unscaledTime >= _frameAutoHideAt)
             {
                 HideSelectionFrame();
@@ -318,6 +340,7 @@ namespace LFBetterMusic.Lyrics
             _canvasGroup = null;
             _frameBackground = null;
             _toolbarRoot = null;
+            _lockIconImage = null;
             _secondaryMenuObject = null;
             _secondaryMenuRect = null;
             _tertiaryMenuObject = null;
@@ -440,27 +463,34 @@ namespace LFBetterMusic.Lyrics
             toolbarRect.anchorMin = new Vector2(0.5f, 1f);
             toolbarRect.anchorMax = new Vector2(0.5f, 1f);
             toolbarRect.pivot = new Vector2(0.5f, 1f);
-            toolbarRect.sizeDelta = new Vector2(76f, 34f);
+            toolbarRect.sizeDelta = new Vector2(114f, 34f);
             toolbarRect.anchoredPosition = new Vector2(0f, -2f);
 
             EnsureToolbarIconSprites();
             CreateToolbarButton(
                 "Settings",
                 toolbarRect,
-                new Vector2(-19f, -17f),
+                new Vector2(-38f, -17f),
                 _settingsIconSprite,
                 ToggleSecondaryMenu);
             CreateToolbarButton(
                 "Restore",
                 toolbarRect,
-                new Vector2(19f, -17f),
+                new Vector2(0f, -17f),
                 _restoreIconSprite,
                 ResetRuntimeStyle);
+            _lockIconImage = CreateToolbarButton(
+                "PositionLock",
+                toolbarRect,
+                new Vector2(38f, -17f),
+                _openLockIconSprite,
+                TogglePositionLock);
+            RefreshLockIcon();
 
             _toolbarRoot.SetActive(false);
         }
 
-        private void CreateToolbarButton(
+        private Image CreateToolbarButton(
             string name,
             RectTransform parent,
             Vector2 anchoredPosition,
@@ -483,7 +513,7 @@ namespace LFBetterMusic.Lyrics
             image.color = ButtonColor;
             image.raycastTarget = true;
 
-            CreateToolbarIcon(button.transform, iconSprite);
+            Image icon = CreateToolbarIcon(button.transform, iconSprite);
             AddInteractiveVisualTriggers(button, image, ButtonColor, ButtonHoverColor);
             AddTrigger(button, EventTriggerType.PointerClick, data =>
             {
@@ -496,6 +526,45 @@ namespace LFBetterMusic.Lyrics
                 TouchInteraction();
                 action?.Invoke();
             });
+            return icon;
+        }
+
+        private bool IsPositionLocked =>
+            _runtimeState != null && _runtimeState.IsPositionLocked;
+
+        private void TogglePositionLock()
+        {
+            if (_runtimeState == null || _rect == null)
+            {
+                return;
+            }
+
+            if (IsPositionLocked)
+            {
+                _runtimeState.UnlockPosition();
+                RefreshLockIcon();
+                _frameAutoHideAt = Time.unscaledTime + FrameAutoHideSeconds;
+                TouchInteraction();
+                return;
+            }
+
+            ClampFrameToParent(false);
+            _runtimeState.LockPosition(_rect.anchoredPosition);
+            RefreshLockIcon();
+            ShowSelectionFrame();
+            HideMenus();
+        }
+
+        private void RefreshLockIcon()
+        {
+            if (_lockIconImage == null)
+            {
+                return;
+            }
+
+            _lockIconImage.sprite = IsPositionLocked
+                ? _closedLockIconSprite
+                : _openLockIconSprite;
         }
 
         private void ToggleSecondaryMenu()
@@ -640,7 +709,9 @@ namespace LFBetterMusic.Lyrics
             const int columns = 4;
             const float cellWidth = 50f;
             const float cellHeight = 39f;
-            for (int i = 0; i <= 12; i++)
+            for (int i = TimelineColorPalette.MinAuthorColorId;
+                 i <= TimelineColorPalette.MaxAuthorColorId;
+                 i++)
             {
                 int captured = i;
                 int row = i / columns;
@@ -1018,7 +1089,9 @@ namespace LFBetterMusic.Lyrics
             }
 
             _frameVisible = true;
-            _frameAutoHideAt = Time.unscaledTime + FrameAutoHideSeconds;
+            _frameAutoHideAt = IsPositionLocked
+                ? float.PositiveInfinity
+                : Time.unscaledTime + FrameAutoHideSeconds;
             if (_frameBackground != null)
             {
                 _frameBackground.color = VisibleFrameColor;
@@ -1027,8 +1100,15 @@ namespace LFBetterMusic.Lyrics
             _toolbarRoot?.SetActive(true);
         }
 
-        private void HideSelectionFrame()
+        private void HideSelectionFrame(bool force = false)
         {
+            if (!force && IsPositionLocked && !string.IsNullOrEmpty(_currentKey))
+            {
+                ShowSelectionFrame();
+                HideMenus();
+                return;
+            }
+
             _frameVisible = false;
             _secondaryMenuVisible = false;
             if (_frameBackground != null)
@@ -1050,7 +1130,7 @@ namespace LFBetterMusic.Lyrics
 
         private void TouchInteraction()
         {
-            if (_frameVisible)
+            if (_frameVisible && !IsPositionLocked)
             {
                 _frameAutoHideAt = Time.unscaledTime + FrameAutoHideSeconds;
             }
@@ -1060,7 +1140,7 @@ namespace LFBetterMusic.Lyrics
         {
             PointerEventData pointer = data as PointerEventData;
             if (pointer == null || pointer.button != PointerEventData.InputButton.Left ||
-                _parentRect == null || _rect == null)
+                _parentRect == null || _rect == null || IsPositionLocked)
             {
                 return;
             }
@@ -1137,7 +1217,8 @@ namespace LFBetterMusic.Lyrics
                 _rect.anchoredPosition += correction;
             }
 
-            if (persistIfCustom && _runtimeState != null && _runtimeState.HasCustomPosition)
+            if (persistIfCustom && _runtimeState != null &&
+                (_runtimeState.HasCustomPosition || _runtimeState.IsPositionLocked))
             {
                 _runtimeState.SetPosition(_rect.anchoredPosition);
             }
@@ -1351,16 +1432,26 @@ namespace LFBetterMusic.Lyrics
         {
             if (_settingsIconSprite == null)
             {
-                _settingsIconSprite = CreateProceduralIconSprite("BetterMusicGearIcon", DrawGearIcon);
+                _settingsIconSprite = CreateProceduralIconSprite("BetterAudioGearIcon", DrawGearIcon);
             }
 
             if (_restoreIconSprite == null)
             {
-                _restoreIconSprite = CreateProceduralIconSprite("BetterMusicRestoreIcon", DrawRestoreIcon);
+                _restoreIconSprite = CreateProceduralIconSprite("BetterAudioRestoreIcon", DrawRestoreIcon);
+            }
+
+            if (_openLockIconSprite == null)
+            {
+                _openLockIconSprite = CreateProceduralIconSprite("BetterAudioOpenLockIcon", DrawOpenLockIcon);
+            }
+
+            if (_closedLockIconSprite == null)
+            {
+                _closedLockIconSprite = CreateProceduralIconSprite("BetterAudioClosedLockIcon", DrawClosedLockIcon);
             }
         }
 
-        private void CreateToolbarIcon(Transform parent, Sprite sprite)
+        private Image CreateToolbarIcon(Transform parent, Sprite sprite)
         {
             GameObject iconObject = CreateUiObject(
                 "Icon",
@@ -1378,6 +1469,7 @@ namespace LFBetterMusic.Lyrics
             icon.color = Color.white;
             icon.preserveAspect = true;
             icon.raycastTarget = false;
+            return icon;
         }
 
         private static Sprite CreateProceduralIconSprite(
@@ -1450,7 +1542,7 @@ namespace LFBetterMusic.Lyrics
             Color32 white = new Color32(255, 255, 255, 255);
             float center = (size - 1) * 0.5f;
             const float radius = 21f;
-            const float thickness = 4.2f;
+            const float thickness = 4.5f;
 
             for (int y = 0; y < size; y++)
             {
@@ -1465,12 +1557,90 @@ namespace LFBetterMusic.Lyrics
                         angle += 360f;
                     }
 
-                    // 在左侧留出缺口，并绘制一个向左的三角箭头。
+                    // 逆时针复位：保留左上方箭头，圆环在箭头附近留出明确缺口。
                     bool arc = Mathf.Abs(r - radius) <= thickness &&
-                               !(angle >= 145f && angle <= 215f);
-                    bool arrow = dx >= -29f && dx <= -10f &&
-                                 Mathf.Abs(dy) <= (dx + 29f) * 0.60f;
-                    if (arc || arrow)
+                               !(angle >= 128f && angle <= 188f);
+
+                    // 箭头尖指向左侧，尾部接回圆环，避免小尺寸下看成普通圆圈。
+                    bool arrowHead = dx >= -29f && dx <= -13f &&
+                                     Mathf.Abs(dy - 9f) <= (dx + 29f) * 0.72f;
+                    bool arrowTail = dx >= -17f && dx <= -8f &&
+                                     dy >= 5f && dy <= 13f;
+
+                    // 中心基准点表示“恢复到默认位置/默认状态”。
+                    bool centerDot = dx * dx + dy * dy <= 5.5f * 5.5f;
+
+                    if (arc || arrowHead || arrowTail || centerDot)
+                    {
+                        pixels[y * size + x] = white;
+                    }
+                }
+            }
+        }
+
+        private static void DrawOpenLockIcon(Color32[] pixels, int size)
+        {
+            DrawLockIcon(pixels, size, false);
+        }
+
+        private static void DrawClosedLockIcon(Color32[] pixels, int size)
+        {
+            DrawLockIcon(pixels, size, true);
+        }
+
+        private static void DrawLockIcon(Color32[] pixels, int size, bool closed)
+        {
+            Color32 white = new Color32(255, 255, 255, 255);
+            float center = (size - 1) * 0.5f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x - center;
+                    float dy = y - center;
+
+                    // 锁体使用粗线框，和设置、复位图标保持统一的线性风格。
+                    bool bodyOuter = Mathf.Abs(dx) <= 21f && dy >= -3f && dy <= 25f;
+                    bool bodyInner = Mathf.Abs(dx) <= 15f && dy >= 3f && dy <= 19f;
+                    bool bodyOutline = bodyOuter && !bodyInner;
+
+                    // 锁孔：圆点加短柄，保证 22px 实际显示尺寸下仍然清晰。
+                    bool keyCircle = dx * dx + (dy - 8f) * (dy - 8f) <= 4.8f * 4.8f;
+                    bool keyStem = Mathf.Abs(dx) <= 2.2f && dy >= 8f && dy <= 16f;
+
+                    bool shackle;
+                    if (closed)
+                    {
+                        // 闭锁：锁梁居中并与锁体两侧完整连接。
+                        float sx = dx;
+                        float sy = dy + 3f;
+                        float outer = sx * sx / (15f * 15f) + sy * sy / (18f * 18f);
+                        float inner = sx * sx / (9f * 9f) + sy * sy / (12f * 12f);
+                        shackle = outer <= 1.05f && inner >= 1f && dy <= 1f;
+                    }
+                    else
+                    {
+                        // 开锁：锁梁向左偏移，右侧明确断开并抬起，避免与闭锁状态混淆。
+                        float sx = dx + 6f;
+                        float sy = dy + 3f;
+                        float outer = sx * sx / (15f * 15f) + sy * sy / (18f * 18f);
+                        float inner = sx * sx / (9f * 9f) + sy * sy / (12f * 12f);
+                        shackle = outer <= 1.05f && inner >= 1f && dy <= 1f;
+
+                        // 移除右下连接段，形成真正的开口。
+                        if (dx > 4f && dy > -13f)
+                        {
+                            shackle = false;
+                        }
+
+                        // 左侧锁梁仍与锁体连接。
+                        bool leftConnector = dx >= -20f && dx <= -13f &&
+                                             dy >= -4f && dy <= 3f;
+                        shackle |= leftConnector;
+                    }
+
+                    if (bodyOutline || keyCircle || keyStem || shackle)
                     {
                         pixels[y * size + x] = white;
                     }
@@ -1531,39 +1701,7 @@ namespace LFBetterMusic.Lyrics
 
         internal static Color ResolveColor(int colorMode)
         {
-            // 13~15 是唱歌模式内部颜色，不属于作者可输入或菜单可选择的 0~12。
-            switch (colorMode)
-            {
-                case 13:
-                    return new Color(0.34f, 0.78f, 1f, 1f); // 男：天蓝色
-                case 14:
-                    return new Color(1f, 0.48f, 0.72f, 1f); // 女：粉色
-                case 15:
-                    return new Color(0.72f, 0.48f, 1f, 1f); // 合唱：紫色
-            }
-
-            if (colorMode <= 0 || colorMode > 12)
-            {
-                return Color.white;
-            }
-
-            float[] hues =
-            {
-                0f,
-                15f / 360f,
-                30f / 360f,
-                45f / 360f,
-                60f / 360f,
-                90f / 360f,
-                120f / 360f,
-                180f / 360f,
-                240f / 360f,
-                270f / 360f,
-                300f / 360f,
-                330f / 360f
-            };
-
-            return Color.HSVToRGB(hues[colorMode - 1], 0.82f, 1f);
+            return TimelineColorPalette.Resolve(colorMode);
         }
     }
 }

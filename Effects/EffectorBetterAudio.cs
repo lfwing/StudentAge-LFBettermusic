@@ -1,20 +1,20 @@
 using System.Collections.Generic;
 using Effect;
-using LFBetterMusic.Runtime;
+using LFBetterAudio.Runtime;
 using Sdk;
 using View.Event;
 using View.Evt;
 
-namespace LFBetterMusic.Effects
+namespace LFBetterAudio.Effects
 {
-    public sealed class EffectorBetterMusic : Effector
+    public sealed class EffectorBetterAudio : Effector
     {
-        private readonly BetterMusicEffectRequest _request;
+        private readonly BetterAudioEffectRequest _request;
 
-        internal EffectorBetterMusic(
+        internal EffectorBetterAudio(
             Effector previous,
             List<float> effect,
-            BetterMusicEffectRequest request)
+            BetterAudioEffectRequest request)
             : base(previous, effect)
         {
             _request = request;
@@ -27,7 +27,7 @@ namespace LFBetterMusic.Effects
                 ? RuntimeTalkAccess.TryGetTalkId(runtimeView)
                 : 0;
 
-            BetterMusicController controller = BetterMusicController.EnsureInstance();
+            BetterAudioController controller = BetterAudioController.EnsureInstance();
             if (controller == null)
             {
                 Plugin.LogEffectError("无法创建播放控制器，指令未执行。");

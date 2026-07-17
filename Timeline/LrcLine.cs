@@ -1,4 +1,4 @@
-namespace LFBetterMusic.Lyrics
+namespace LFBetterAudio.Timeline
 {
     public sealed class LrcLine
     {

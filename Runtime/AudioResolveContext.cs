@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using Config;
 
-namespace LFBetterMusic.Runtime
+namespace LFBetterAudio.Runtime
 {
-    public sealed class MusicResolveContext
+    public sealed class AudioResolveContext
     {
         public TalkChannel Channel { get; set; }
         public Dictionary<int, AudioCfg> PreviewAudioCfgMap { get; set; }

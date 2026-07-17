@@ -1,16 +1,16 @@
 using HarmonyLib;
-using LFBetterMusic.Runtime;
+using LFBetterAudio.Runtime;
 using Sdk;
 using View.Evt;
 
-namespace LFBetterMusic.Patches
+namespace LFBetterAudio.Patches
 {
     [HarmonyPatch(typeof(NewTalkView), nameof(NewTalkView.OnHotKeyStartPress))]
     internal static class NewTalkHoldStartPatch
     {
         private static bool Prefix(NewTalkView __instance, int __0, ref bool __result)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.HandleHoldStart(__instance, __0))
             {
                 return true;
@@ -26,7 +26,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(NewTalkView __instance, int __0, ref bool __result)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.HandleHoldTick(__instance, __0))
             {
                 return true;
@@ -42,7 +42,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(NewTalkView __instance, int __0, ref bool __result)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.HandleHoldRelease(__instance, __0))
             {
                 return true;
@@ -64,7 +64,7 @@ namespace LFBetterMusic.Patches
                 return true;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.HandleHoldStart(__instance, __0))
             {
                 return true;
@@ -85,7 +85,7 @@ namespace LFBetterMusic.Patches
                 return true;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.HandleHoldTick(__instance, __0))
             {
                 return true;
@@ -101,7 +101,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(PreviewTalkView __instance, int __0, ref bool __result)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller == null || !controller.HandleHoldRelease(__instance, __0))
             {
                 return true;

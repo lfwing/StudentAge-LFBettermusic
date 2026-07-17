@@ -5,17 +5,17 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
-namespace LFBetterMusic.Discovery
+namespace LFBetterAudio.Discovery
 {
     /// <summary>
-    /// 发现已安装的 StudentAge Steam 创意工坊 Mod 中的 Bettermusic 资源包。
+    /// 发现已安装的 StudentAge Steam 创意工坊 Mod 中的 BetterAudio 音频资源包。
     /// 不复制文件；只登记每个包自己的物理目录。
     /// </summary>
-    public static class BetterMusicPackageDiscovery
+    public static class BetterAudioPackageDiscovery
     {
         public const string DefaultWorkshopAppId = "1991040";
-        public const string BetterMusicFolderName = "Bettermusic";
-        public const string BetterMusicConfigFileName = "Bettermusic.json";
+        public const string BetterAudioFolderName = "BetterAudio";
+        public const string BetterAudioConfigFileName = "BetterAudio.json";
 
         private static readonly Regex VdfPathRegex = new Regex(
             "\\\"path\\\"\\s*\\\"(?<path>[^\\\"]+)\\\"",
@@ -26,10 +26,10 @@ namespace LFBetterMusic.Discovery
             "\\\"\\d+\\\"\\s*\\\"(?<path>[A-Za-z]:\\\\[^\\\"]+)\\\"",
             RegexOptions.Compiled);
 
-        public static IReadOnlyList<BetterMusicPackage> DiscoverWorkshopPackages(string gameRootPath)
+        public static IReadOnlyList<BetterAudioPackage> DiscoverWorkshopPackages(string gameRootPath)
         {
             string appId = ResolveAppId(gameRootPath);
-            var packages = new List<BetterMusicPackage>();
+            var packages = new List<BetterAudioPackage>();
             var seenConfigPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (string libraryRoot in DiscoverSteamLibraryRoots(gameRootPath))
@@ -63,20 +63,20 @@ namespace LFBetterMusic.Discovery
 
                 foreach (string itemRoot in itemRoots)
                 {
-                    string betterMusicDirectory = FindDirectChildDirectory(
+                    string betterAudioDirectory = FindDirectChildDirectory(
                         itemRoot,
-                        BetterMusicFolderName);
-                    if (betterMusicDirectory == null)
+                        BetterAudioFolderName);
+                    if (betterAudioDirectory == null)
                     {
                         continue;
                     }
 
                     string configPath = FindDirectChildFile(
-                        betterMusicDirectory,
-                        BetterMusicConfigFileName);
+                        betterAudioDirectory,
+                        BetterAudioConfigFileName);
                     if (configPath == null)
                     {
-                        // 用户已说明 Mod 作者会按模板创建；这里静默跳过非 BetterMusic 包。
+                        // 用户已说明 Mod 作者会按模板创建；这里静默跳过非 BetterAudio 包。
                         continue;
                     }
 
@@ -87,10 +87,10 @@ namespace LFBetterMusic.Discovery
                     }
 
                     string workshopItemId = new DirectoryInfo(itemRoot).Name;
-                    packages.Add(new BetterMusicPackage
+                    packages.Add(new BetterAudioPackage
                     {
                         ModRootDirectory = SafeFullPath(itemRoot),
-                        BetterMusicDirectory = SafeFullPath(betterMusicDirectory),
+                        BetterAudioDirectory = SafeFullPath(betterAudioDirectory),
                         ConfigPath = fullConfigPath,
                         SourceLabel = $"Workshop:{workshopItemId}",
                         WorkshopItemId = workshopItemId,

@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace LFBetterMusic.Lyrics
+namespace LFBetterAudio.Timeline
 {
     public static class LrcParser
     {

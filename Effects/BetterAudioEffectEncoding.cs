@@ -2,50 +2,55 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace LFBetterMusic.Effects
+namespace LFBetterAudio.Effects
 {
-    internal enum BetterMusicCommandKind
+    internal enum BetterAudioCommandKind
     {
         StopAndRefresh,
         Play,
         PauseOrResume
     }
 
-    internal enum BetterMusicPlaybackScope
+    internal enum BetterAudioPlaybackScope
     {
         SingleTalk,
         Background
     }
 
-    internal enum BetterMusicContentKind
+    internal enum BetterAudioContentKind
     {
         BackgroundMusic,
-        Singing
+        Singing,
+        SoundEffect
     }
 
-    internal sealed class BetterMusicEffectRequest
+    internal sealed class BetterAudioEffectRequest
     {
-        internal BetterMusicCommandKind Command { get; set; }
-        internal BetterMusicPlaybackScope Scope { get; set; }
-        internal BetterMusicContentKind ContentKind { get; set; }
+        internal BetterAudioCommandKind Command { get; set; }
+        internal BetterAudioPlaybackScope Scope { get; set; }
+        internal BetterAudioContentKind ContentKind { get; set; }
         internal int SourceSubcommand { get; set; }
         internal int MusicId { get; set; }
         internal int PlayMode { get; set; }
         internal int LyricSizeMode { get; set; }
         internal int LyricColorMode { get; set; }
         internal int PauseAction { get; set; }
+        // 仅 1163,10 使用：0=无限循环，正整数=总播放次数。
+        internal int RepeatCount { get; set; } = 1;
         internal IReadOnlyList<int> SingerRoleIds { get; set; } = Array.Empty<int>();
         internal bool HasStartLine { get; set; }
         internal int StartLine { get; set; }
         internal bool HasEndLine { get; set; }
         internal int EndLine { get; set; }
 
-        internal bool ShowLyrics => LyricSizeMode != -1;
-        internal bool ShouldLoop => PlayMode == 2;
-        internal bool IsSinging => ContentKind == BetterMusicContentKind.Singing;
+        internal bool IsSoundEffect => ContentKind == BetterAudioContentKind.SoundEffect;
+        internal bool ShowLyrics => !IsSoundEffect && LyricSizeMode != -1;
+        internal bool UsesRepeatCount => SourceSubcommand == 10;
+        internal bool ShouldLoop => UsesRepeatCount ? RepeatCount == 0 : PlayMode == 2;
+        internal bool IsSinging => ContentKind == BetterAudioContentKind.Singing;
     }
 
-    internal static class BetterMusicEffectEncoding
+    internal static class BetterAudioEffectEncoding
     {
         internal const float DirectFactoryId = 1163f;
 
@@ -56,7 +61,7 @@ namespace LFBetterMusic.Effects
 
         internal static bool TryParse(
             IReadOnlyList<float> effect,
-            out BetterMusicEffectRequest request,
+            out BetterAudioEffectRequest request,
             out string error)
         {
             request = null;
@@ -77,9 +82,9 @@ namespace LFBetterMusic.Effects
             switch (subcommand)
             {
                 case 0:
-                    request = new BetterMusicEffectRequest
+                    request = new BetterAudioEffectRequest
                     {
-                        Command = BetterMusicCommandKind.StopAndRefresh,
+                        Command = BetterAudioCommandKind.StopAndRefresh,
                         SourceSubcommand = 0
                     };
                     return true;
@@ -87,7 +92,7 @@ namespace LFBetterMusic.Effects
                 case 1:
                     return TryParseBackgroundMusicPlayback(
                         effect,
-                        BetterMusicPlaybackScope.SingleTalk,
+                        BetterAudioPlaybackScope.SingleTalk,
                         1,
                         out request,
                         out error);
@@ -95,15 +100,23 @@ namespace LFBetterMusic.Effects
                 case 2:
                     return TryParseSingingPlayback(
                         effect,
-                        BetterMusicPlaybackScope.SingleTalk,
+                        BetterAudioPlaybackScope.SingleTalk,
                         2,
+                        out request,
+                        out error);
+
+                case 3:
+                    return TryParseSoundEffectPlayback(
+                        effect,
+                        BetterAudioPlaybackScope.SingleTalk,
+                        3,
                         out request,
                         out error);
 
                 case 10:
                     return TryParseBackgroundMusicPlayback(
                         effect,
-                        BetterMusicPlaybackScope.Background,
+                        BetterAudioPlaybackScope.Background,
                         10,
                         out request,
                         out error);
@@ -111,44 +124,112 @@ namespace LFBetterMusic.Effects
                 case 20:
                     return TryParseSingingPlayback(
                         effect,
-                        BetterMusicPlaybackScope.Background,
+                        BetterAudioPlaybackScope.Background,
                         20,
                         out request,
                         out error);
 
+                case 30:
+                    return TryParseSoundEffectPlayback(
+                        effect,
+                        BetterAudioPlaybackScope.Background,
+                        30,
+                        out request,
+                        out error);
+
                 case 99:
-                    if (effect.Count < 3)
+                    if (effect.Count != 3)
                     {
-                        error = "1163,99 格式必须为：1163,99,1 或 1163,99,2。";
+                        error = "1163,99 格式必须严格为：1163,99,1/2/3/4/10/20。";
                         return true;
                     }
 
                     int pauseAction = (int)effect[2];
-                    if (pauseAction != 1 && pauseAction != 2)
+                    if (Math.Abs(effect[2] - pauseAction) > 0.0001f)
                     {
-                        error = $"1163,99 参数 x={pauseAction} 无效，只允许 1（暂停）或 2（恢复）。";
+                        error = $"1163,99 参数 x={effect[2]:0.###} 无效，必须填写整数。";
+                        return true;
+                    }
+                    if (pauseAction != 1 && pauseAction != 2 &&
+                        pauseAction != 3 && pauseAction != 4 &&
+                        pauseAction != 10 && pauseAction != 20)
+                    {
+                        error = $"1163,99 参数 x={pauseAction} 无效，只允许 " +
+                                "1（立即暂停音乐）、2（立即恢复音乐）、" +
+                                "3（暂停当前音效）、4（恢复当前音效）、" +
+                                "10（淡出暂停音乐）或20（淡入恢复音乐）。";
                         return true;
                     }
 
-                    request = new BetterMusicEffectRequest
+                    request = new BetterAudioEffectRequest
                     {
-                        Command = BetterMusicCommandKind.PauseOrResume,
+                        Command = BetterAudioCommandKind.PauseOrResume,
                         SourceSubcommand = 99,
                         PauseAction = pauseAction
                     };
                     return true;
 
                 default:
-                    error = $"1163 子指令 {subcommand} 无效。当前可用：0、1、2、10、20、99。";
+                    error = $"1163 子指令 {subcommand} 无效。当前可用：0、1、2、3、10、20、30、99。";
                     return true;
             }
         }
 
+        private static bool TryParseSoundEffectPlayback(
+            IReadOnlyList<float> effect,
+            BetterAudioPlaybackScope scope,
+            int subcommand,
+            out BetterAudioEffectRequest request,
+            out string error)
+        {
+            request = null;
+            error = null;
+
+            if (effect.Count < 4 || effect.Count > 6)
+            {
+                error = $"1163,{subcommand} 格式必须为：" +
+                        $"1163,{subcommand},音效ID,播放类型[,u[,v]]。";
+                return true;
+            }
+
+            int audioId = (int)effect[2];
+            if (Math.Abs(effect[2] - audioId) > 0.0001f || audioId <= 0)
+            {
+                error = $"1163,{subcommand} 音效 ID x={effect[2]:0.###} 无效，必须填写大于 0 的整数。";
+                return true;
+            }
+
+            int playMode = (int)effect[3];
+            if (Math.Abs(effect[3] - playMode) > 0.0001f ||
+                (playMode != 1 && playMode != 2))
+            {
+                error = $"1163,{subcommand} 播放类型 y={effect[3]:0.###} 无效，只允许 " +
+                        "1（播放一次）或2（循环播放）。";
+                return true;
+            }
+
+            request = new BetterAudioEffectRequest
+            {
+                Command = BetterAudioCommandKind.Play,
+                Scope = scope,
+                ContentKind = BetterAudioContentKind.SoundEffect,
+                SourceSubcommand = subcommand,
+                MusicId = audioId,
+                PlayMode = playMode,
+                LyricSizeMode = -1,
+                LyricColorMode = 0,
+                RepeatCount = 1
+            };
+
+            // 音效不显示歌词，但可把 LRC 当作时间轴，通过 u/v 选择播放区间。
+            return TryParseLineRange(effect, 4, request, out error);
+        }
+
         private static bool TryParseBackgroundMusicPlayback(
             IReadOnlyList<float> effect,
-            BetterMusicPlaybackScope scope,
+            BetterAudioPlaybackScope scope,
             int subcommand,
-            out BetterMusicEffectRequest request,
+            out BetterAudioEffectRequest request,
             out string error)
         {
             request = null;
@@ -156,8 +237,11 @@ namespace LFBetterMusic.Effects
 
             if (effect.Count < 6)
             {
+                string yName = scope == BetterAudioPlaybackScope.Background
+                    ? "播放次数"
+                    : "播放类型";
                 error = $"1163,{subcommand} 格式参数不足，必须为：" +
-                        $"1163,{subcommand},音乐ID,播放类型,歌词字号,歌词颜色[,u[,v]]。";
+                        $"1163,{subcommand},音乐ID,{yName},歌词字号,歌词颜色[,u[,v]]。";
                 return true;
             }
 
@@ -174,9 +258,12 @@ namespace LFBetterMusic.Effects
                 return true;
             }
 
-            int playMode = (int)effect[3];
-            if (scope == BetterMusicPlaybackScope.SingleTalk)
+            int rawY = (int)effect[3];
+            int playMode;
+            int repeatCount = 1;
+            if (scope == BetterAudioPlaybackScope.SingleTalk)
             {
+                playMode = rawY;
                 if (playMode < 1 || playMode > 3)
                 {
                     error = $"1163,1 播放类型 y={playMode} 无效，只允许 1、2、3。";
@@ -185,8 +272,22 @@ namespace LFBetterMusic.Effects
             }
             else
             {
-                // 针对背景的背景型音乐固定循环。
-                playMode = 2;
+                // 1163,10 的 y 改为播放次数：0=无限循环，正整数=总播放次数。
+                if (Math.Abs(effect[3] - rawY) > 0.0001f)
+                {
+                    error = $"1163,10 播放次数 y={effect[3]:0.###} 无效，必须填写整数。";
+                    return true;
+                }
+
+                if (rawY < 0)
+                {
+                    error = $"1163,10 播放次数 y={rawY} 无效，必须为非负整数；0 表示无限循环。";
+                    return true;
+                }
+
+                repeatCount = rawY;
+                // PlayMode 仅用于保持旧状态机字段语义；实际循环由 RepeatCount 控制。
+                playMode = repeatCount == 0 ? 2 : 1;
             }
 
             int lyricSizeMode = NormalizeBackgroundLyricSize((int)effect[4]);
@@ -194,14 +295,15 @@ namespace LFBetterMusic.Effects
                 ? 0
                 : NormalizeLyricColor((int)effect[5]);
 
-            request = new BetterMusicEffectRequest
+            request = new BetterAudioEffectRequest
             {
-                Command = BetterMusicCommandKind.Play,
+                Command = BetterAudioCommandKind.Play,
                 Scope = scope,
-                ContentKind = BetterMusicContentKind.BackgroundMusic,
+                ContentKind = BetterAudioContentKind.BackgroundMusic,
                 SourceSubcommand = subcommand,
                 MusicId = musicId,
                 PlayMode = playMode,
+                RepeatCount = repeatCount,
                 LyricSizeMode = lyricSizeMode,
                 LyricColorMode = lyricColorMode
             };
@@ -211,9 +313,9 @@ namespace LFBetterMusic.Effects
 
         private static bool TryParseSingingPlayback(
             IReadOnlyList<float> effect,
-            BetterMusicPlaybackScope scope,
+            BetterAudioPlaybackScope scope,
             int subcommand,
-            out BetterMusicEffectRequest request,
+            out BetterAudioEffectRequest request,
             out string error)
         {
             request = null;
@@ -265,15 +367,15 @@ namespace LFBetterMusic.Effects
                 return true;
             }
 
-            request = new BetterMusicEffectRequest
+            request = new BetterAudioEffectRequest
             {
-                Command = BetterMusicCommandKind.Play,
+                Command = BetterAudioCommandKind.Play,
                 Scope = scope,
-                ContentKind = BetterMusicContentKind.Singing,
+                ContentKind = BetterAudioContentKind.Singing,
                 SourceSubcommand = subcommand,
                 MusicId = musicId,
                 // 单 Talk 唱歌固定为 3；背景唱歌固定为 1。
-                PlayMode = scope == BetterMusicPlaybackScope.SingleTalk ? 3 : 1,
+                PlayMode = scope == BetterAudioPlaybackScope.SingleTalk ? 3 : 1,
                 LyricSizeMode = NormalizeSingingLyricSize((int)effect[4]),
                 LyricColorMode = 0,
                 SingerRoleIds = singerRoleIds
@@ -285,7 +387,7 @@ namespace LFBetterMusic.Effects
         private static bool TryParseLineRange(
             IReadOnlyList<float> effect,
             int startIndex,
-            BetterMusicEffectRequest request,
+            BetterAudioEffectRequest request,
             out string error)
         {
             error = null;
@@ -341,7 +443,7 @@ namespace LFBetterMusic.Effects
 
         private static int NormalizeLyricColor(int value)
         {
-            return value >= 0 && value <= 12 ? value : 0;
+            return value >= 0 && value <= 31 ? value : 0;
         }
 
         internal static string Format(IReadOnlyList<float> effect)

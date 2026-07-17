@@ -1,10 +1,11 @@
 using System.Collections.Generic;
 using Config;
-using LFBetterMusic.Preview;
+using LFBetterAudio.Preview;
+using LFBetterAudio.Timeline;
 using Sdk;
 using TheEntity;
 
-namespace LFBetterMusic.Runtime
+namespace LFBetterAudio.Runtime
 {
     internal sealed class SingingRoleInfo
     {
@@ -19,13 +20,13 @@ namespace LFBetterMusic.Runtime
             {
                 if (Gender == GenderDefine.Male)
                 {
-                    return 13;
+                    return TimelineColorPalette.MaleInternalColorId;
                 }
                 if (Gender == GenderDefine.Female)
                 {
-                    return 14;
+                    return TimelineColorPalette.FemaleInternalColorId;
                 }
-                return 15;
+                return TimelineColorPalette.ChoirInternalColorId;
             }
         }
     }

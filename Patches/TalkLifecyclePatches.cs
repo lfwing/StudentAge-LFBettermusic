@@ -1,13 +1,13 @@
-﻿using System;
+using System;
 using HarmonyLib;
-using LFBetterMusic.Effects;
-using LFBetterMusic.Preview;
-using LFBetterMusic.Runtime;
+using LFBetterAudio.Effects;
+using LFBetterAudio.Preview;
+using LFBetterAudio.Runtime;
 using Sdk;
 using View.Event;
 using View.Evt;
 
-namespace LFBetterMusic.Patches
+namespace LFBetterAudio.Patches
 {
     [HarmonyPatch(typeof(NewTalkView), nameof(NewTalkView.RefreshTalk))]
     internal static class NewTalkRefreshPatch
@@ -16,7 +16,7 @@ namespace LFBetterMusic.Patches
         {
             EarlyTalkPlan plan = Early1163Execution.PrepareRuntimeIncomingTalk(__instance, __0);
             bool deferSingleTalkEnd = !plan.IsEmpty || plan.HasValidPlayCommand;
-            BetterMusicController.Instance?.BeforeTalkRefresh(
+            BetterAudioController.Instance?.BeforeTalkRefresh(
                 __instance,
                 __0,
                 deferSingleTalkEnd);
@@ -25,7 +25,7 @@ namespace LFBetterMusic.Patches
         private static void Postfix(NewTalkView __instance)
         {
             int currentTalkId = RuntimeTalkAccess.TryGetTalkId(__instance);
-            BetterMusicController.Instance?.AfterTalkRefresh(__instance, currentTalkId);
+            BetterAudioController.Instance?.AfterTalkRefresh(__instance, currentTalkId);
         }
     }
 
@@ -35,12 +35,12 @@ namespace LFBetterMusic.Patches
         private static void Prefix(CommonTalkView __instance, int __0)
         {
             // CommonTalkView 没有 DoText 提前入口，继续按原逻辑在切换时结束单 Talk 会话。
-            BetterMusicController.Instance?.BeforeTalkRefresh(__instance, __0, false);
+            BetterAudioController.Instance?.BeforeTalkRefresh(__instance, __0, false);
         }
 
         private static void Postfix(CommonTalkView __instance)
         {
-            BetterMusicController.Instance?.AfterTalkRefresh(__instance, -1);
+            BetterAudioController.Instance?.AfterTalkRefresh(__instance, -1);
         }
     }
 
@@ -51,7 +51,7 @@ namespace LFBetterMusic.Patches
         {
             EarlyTalkPlan plan = Early1163Execution.PreparePreviewIncomingTalk(__instance, __0);
             bool deferSingleTalkEnd = !plan.IsEmpty || plan.HasValidPlayCommand;
-            BetterMusicController.Instance?.BeforeTalkRefresh(
+            BetterAudioController.Instance?.BeforeTalkRefresh(
                 __instance,
                 __0,
                 deferSingleTalkEnd);
@@ -60,7 +60,7 @@ namespace LFBetterMusic.Patches
         private static void Postfix(PreviewTalkView __instance)
         {
             int currentTalkId = PreviewTalkAccess.GetCurrentCfg(__instance)?.id ?? 0;
-            BetterMusicController.Instance?.AfterTalkRefresh(__instance, currentTalkId);
+            BetterAudioController.Instance?.AfterTalkRefresh(__instance, currentTalkId);
         }
     }
 
@@ -74,7 +74,7 @@ namespace LFBetterMusic.Patches
                 return true;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             return controller == null || !controller.ShouldBlockFastForward(__instance);
         }
     }
@@ -84,7 +84,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(NewTalkView __instance)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             return controller == null || !controller.ShouldBlockFastForward(__instance);
         }
     }
@@ -94,7 +94,7 @@ namespace LFBetterMusic.Patches
     {
         private static bool Prefix(NewTalkView __instance)
         {
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller != null && controller.ShouldBlockClose(__instance))
             {
                 return false;
@@ -115,7 +115,7 @@ namespace LFBetterMusic.Patches
                 return true;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller != null && controller.ShouldBlockClose(__instance))
             {
                 return false;
@@ -139,7 +139,7 @@ namespace LFBetterMusic.Patches
                 return true;
             }
 
-            BetterMusicController controller = BetterMusicController.Instance;
+            BetterAudioController controller = BetterAudioController.Instance;
             if (controller != null && controller.ShouldBlockClose(__0))
             {
                 return false;
@@ -155,7 +155,7 @@ namespace LFBetterMusic.Patches
     {
         private static void Prefix(NewTalkView __instance)
         {
-            BetterMusicController.Instance?.CleanupForView(__instance, "NewTalkView.OnClose");
+            BetterAudioController.Instance?.CleanupForView(__instance, "NewTalkView.OnClose");
         }
     }
 
@@ -164,7 +164,7 @@ namespace LFBetterMusic.Patches
     {
         private static void Prefix(PreviewTalkView __instance)
         {
-            BetterMusicController.Instance?.CleanupForView(__instance, "PreviewTalkView.OnClose");
+            BetterAudioController.Instance?.CleanupForView(__instance, "PreviewTalkView.OnClose");
         }
     }
 }

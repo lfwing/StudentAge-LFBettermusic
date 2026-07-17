@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using Effect;
-using LFBetterMusic.Effects;
+using LFBetterAudio.Effects;
 
-namespace LFBetterMusic.Patches
+namespace LFBetterAudio.Patches
 {
     /// <summary>
     /// 正常游戏 EFFECT 工厂的精确入口。
@@ -25,9 +25,9 @@ namespace LFBetterMusic.Patches
                 return false;
             }
 
-            bool isCustom = BetterMusicEffectEncoding.TryParse(
+            bool isCustom = BetterAudioEffectEncoding.TryParse(
                 __0,
-                out BetterMusicEffectRequest request,
+                out BetterAudioEffectRequest request,
                 out string error);
 
             if (!isCustom)
@@ -42,7 +42,7 @@ namespace LFBetterMusic.Patches
                 return false;
             }
 
-            __result = new EffectorBetterMusic(__1, __0, request)
+            __result = new EffectorBetterAudio(__1, __0, request)
             {
                 toRoleId = __2,
                 fromRoleId = __3

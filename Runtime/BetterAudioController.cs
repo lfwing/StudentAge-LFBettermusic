@@ -1,32 +1,49 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Config;
 using GenUI.Talk;
-using LFBetterMusic.Assets;
-using LFBetterMusic.Audio;
-using LFBetterMusic.Effects;
-using LFBetterMusic.Lyrics;
-using LFBetterMusic.UI;
+using LFBetterAudio.Assets;
+using LFBetterAudio.Audio;
+using LFBetterAudio.Effects;
+using LFBetterAudio.Timeline;
+using LFBetterAudio.UI;
 using Sdk;
 using UnityEngine;
 using View.Evt;
 
-namespace LFBetterMusic.Runtime
+namespace LFBetterAudio.Runtime
 {
-    public sealed class BetterMusicController : MonoBehaviour
+    internal enum BetterAudioVolumeFadeKind
     {
-        public static BetterMusicController Instance { get; private set; }
+        None,
+        FadeOutPause,
+        FadeInResume
+    }
+
+    public sealed partial class BetterAudioController : MonoBehaviour
+    {
+        public static BetterAudioController Instance { get; private set; }
 
         private const float SingleTalkMinimumHoldSeconds = 0.4f;
         private const float HoldToSkipSeconds = 1f;
         private const int HoldToSkipHotKey = 128;
+        private const float PauseFadeDurationSeconds = 0.8f;
 
         private AudioSource _audioSource;
         private GameObject _audioObject;
-        private BetterMusicSession _session;
+        private BetterAudioSession _session;
         private FloatingLyricsOverlay _lyricsOverlay;
         private HoldToSkipOverlay _holdToSkipOverlay;
+        private readonly FloatingLyricsPositionLockState _lyricsPositionLockState =
+            new FloatingLyricsPositionLockState();
         private long _tokenCounter;
+
+        private BetterAudioVolumeFadeKind _volumeFadeKind;
+        private long _volumeFadeSessionToken;
+        private float _volumeFadeStartedAt;
+        private float _volumeFadeDuration;
+        private float _volumeFadeFrom;
+        private float _volumeFadeTo;
 
         // 预加载只缓存 ResMgr 已返回的 AudioClip，并复用同一路径的在途请求。
         // 不接管原版 AudioMgr，也不改变原版音频配置。
@@ -55,9 +72,9 @@ namespace LFBetterMusic.Runtime
         private float _holdProgress;
         private bool _applicationQuitting;
 
-        public BetterMusicSession ActiveSession => _session;
+        public BetterAudioSession ActiveSession => _session;
 
-        internal static BetterMusicController EnsureInstance()
+        internal static BetterAudioController EnsureInstance()
         {
             if (IsControllerUsable(Instance))
             {
@@ -67,9 +84,9 @@ namespace LFBetterMusic.Runtime
             try
             {
                 Instance = null;
-                var go = new GameObject("lf-BetterMusicController");
+                var go = new GameObject("lf-BetterAudioController");
                 DontDestroyOnLoad(go);
-                return go.AddComponent<BetterMusicController>();
+                return go.AddComponent<BetterAudioController>();
             }
             catch
             {
@@ -97,8 +114,10 @@ namespace LFBetterMusic.Runtime
             Plugin.Instance?.TickPatchHealthFromPersistentController();
             ProcessScheduledAdvance();
             _lyricsOverlay?.Tick(Time.unscaledDeltaTime);
+            ProcessVolumeFade();
+            ProcessSoundEffects();
 
-            BetterMusicSession session = _session;
+            BetterAudioSession session = _session;
             if (session == null || session.IsCancelled)
             {
                 ReleaseGameMusicSuppression();
@@ -137,14 +156,7 @@ namespace LFBetterMusic.Runtime
             {
                 if (HasReachedPlaybackEnd(session, source))
                 {
-                    if (session.ShouldLoop)
-                    {
-                        RestartLoop(session, source);
-                    }
-                    else
-                    {
-                        CompleteOneShot(session);
-                    }
+                    HandlePlaybackEnded(session, source);
                     return;
                 }
 
@@ -155,14 +167,7 @@ namespace LFBetterMusic.Runtime
 
                 if (!source.isPlaying)
                 {
-                    if (session.ShouldLoop)
-                    {
-                        RestartLoop(session, source);
-                    }
-                    else
-                    {
-                        CompleteOneShot(session);
-                    }
+                    HandlePlaybackEnded(session, source);
                 }
             }
             catch (Exception ex)
@@ -173,7 +178,7 @@ namespace LFBetterMusic.Runtime
         }
 
         internal void ExecuteRequest(
-            BetterMusicEffectRequest request,
+            BetterAudioEffectRequest request,
             BaseView owner,
             TalkChannel channel,
             int talkId,
@@ -188,55 +193,85 @@ namespace LFBetterMusic.Runtime
 
             switch (request.Command)
             {
-                case BetterMusicCommandKind.StopAndRefresh:
+                case BetterAudioCommandKind.StopAndRefresh:
                     StopAndRefreshChannel("1163,0");
                     break;
 
-                case BetterMusicCommandKind.Play:
-                    StartSession(
-                        request,
-                        owner,
-                        channel,
-                        talkId,
-                        previewAudioCfgMap,
-                        previewPersonCfgMap,
-                        previewGender);
-                    break;
-
-                case BetterMusicCommandKind.PauseOrResume:
-                    if (request.PauseAction == 1)
+                case BetterAudioCommandKind.Play:
+                    if (request.IsSoundEffect)
                     {
-                        PauseActiveMusic();
+                        StartSoundEffectSession(
+                            request,
+                            owner,
+                            channel,
+                            talkId,
+                            previewAudioCfgMap);
                     }
                     else
                     {
-                        ResumeActiveMusic();
+                        StartSession(
+                            request,
+                            owner,
+                            channel,
+                            talkId,
+                            previewAudioCfgMap,
+                            previewPersonCfgMap,
+                            previewGender);
+                    }
+                    break;
+
+                case BetterAudioCommandKind.PauseOrResume:
+                    switch (request.PauseAction)
+                    {
+                        case 1:
+                            PauseActiveMusic(false);
+                            break;
+                        case 2:
+                            ResumeActiveMusic(false);
+                            break;
+                        case 3:
+                            PauseCurrentSoundEffect();
+                            break;
+                        case 4:
+                            ResumeCurrentSoundEffect();
+                            break;
+                        case 10:
+                            PauseActiveMusic(true);
+                            break;
+                        case 20:
+                            ResumeActiveMusic(true);
+                            break;
                     }
                     break;
             }
         }
 
         internal void PreloadRequest(
-            BetterMusicEffectRequest request,
+            BetterAudioEffectRequest request,
             TalkChannel channel,
             Dictionary<int, AudioCfg> previewAudioCfgMap = null)
         {
-            if (request == null || request.Command != BetterMusicCommandKind.Play)
+            if (request == null || request.Command != BetterAudioCommandKind.Play)
             {
                 return;
             }
 
-            var context = new MusicResolveContext
+            var context = new AudioResolveContext
             {
                 Channel = channel,
                 PreviewAudioCfgMap = previewAudioCfgMap
             };
 
-            if (!MusicResolver.TryResolve(
+            if (!AudioResolver.TryResolve(
                     request.MusicId,
                     context,
-                    out ResolvedMusic resolved,
+                    out ResolvedAudio resolved,
                     out string _))
+            {
+                return;
+            }
+
+            if (!IsRequestAudioTypeCompatible(request, resolved, out string _))
             {
                 return;
             }
@@ -245,7 +280,7 @@ namespace LFBetterMusic.Runtime
         }
 
         private void StartSession(
-            BetterMusicEffectRequest request,
+            BetterAudioEffectRequest request,
             BaseView owner,
             TalkChannel channel,
             int talkId,
@@ -253,7 +288,7 @@ namespace LFBetterMusic.Runtime
             Dictionary<int, PersonCfg> previewPersonCfgMap,
             GenderDefine previewGender)
         {
-            bool singleTalk = request.Scope == BetterMusicPlaybackScope.SingleTalk;
+            bool singleTalk = request.Scope == BetterAudioPlaybackScope.SingleTalk;
             if (singleTalk && owner == null)
             {
                 Plugin.LogEffectError(
@@ -261,24 +296,30 @@ namespace LFBetterMusic.Runtime
                 return;
             }
 
-            var context = new MusicResolveContext
+            var context = new AudioResolveContext
             {
                 Channel = channel,
                 PreviewAudioCfgMap = previewAudioCfgMap
             };
 
-            if (!MusicResolver.TryResolve(
+            if (!AudioResolver.TryResolve(
                     request.MusicId,
                     context,
-                    out ResolvedMusic resolved,
+                    out ResolvedAudio resolved,
                     out string error))
             {
                 Plugin.LogEffectError(error);
                 return;
             }
 
+            if (!IsRequestAudioTypeCompatible(request, resolved, out string typeError))
+            {
+                Plugin.LogEffectError(typeError);
+                return;
+            }
+
             long token = _tokenCounter + 1;
-            var session = new BetterMusicSession
+            var session = new BetterAudioSession
             {
                 Token = token,
                 Request = request,
@@ -291,9 +332,13 @@ namespace LFBetterMusic.Runtime
                 LyricsUiState = new FloatingLyricsRuntimeState(
                     request.LyricSizeMode,
                     request.LyricColorMode,
-                    request.ContentKind == BetterMusicContentKind.Singing),
+                    request.ContentKind == BetterAudioContentKind.Singing,
+                    _lyricsPositionLockState),
                 ShowLyrics = request.ShowLyrics,
                 ShouldLoop = request.ShouldLoop,
+                UsesRepeatCount = request.UsesRepeatCount,
+                RepeatCount = request.RepeatCount,
+                CompletedPlayCount = 0,
                 TalkId = talkId,
                 Channel = channel,
                 OwnerView = owner,
@@ -301,17 +346,17 @@ namespace LFBetterMusic.Runtime
                 MinimumAdvanceAt = singleTalk
                     ? Time.unscaledTime + SingleTalkMinimumHoldSeconds
                     : 0f,
-                ResolvedMusic = resolved,
+                ResolvedAudio = resolved,
                 IsLoading = true
             };
 
             bool needsLyricsForRange = request.HasStartLine || request.HasEndLine;
             bool shouldParseLyrics = session.ShowLyrics || needsLyricsForRange || session.IsSinging;
-            if (shouldParseLyrics && !string.IsNullOrWhiteSpace(resolved.LrcPath))
+            if (shouldParseLyrics && !string.IsNullOrWhiteSpace(resolved.TimelinePath))
             {
                 try
                 {
-                    session.Lyrics = LrcParser.ParseFile(resolved.LrcPath);
+                    session.Lyrics = LrcParser.ParseFile(resolved.TimelinePath);
                 }
                 catch (Exception ex)
                 {
@@ -386,7 +431,7 @@ namespace LFBetterMusic.Runtime
         }
 
         private static bool ValidateRequestedLineRange(
-            BetterMusicEffectRequest request,
+            BetterAudioEffectRequest request,
             IList<LrcLine> lyrics,
             out string error)
         {
@@ -521,7 +566,7 @@ namespace LFBetterMusic.Runtime
 
         private void HandleLoadedClip(long token, AudioClip clip)
         {
-            BetterMusicSession session = _session;
+            BetterAudioSession session = _session;
             if (session == null || session.Token != token || session.IsCancelled)
             {
                 return;
@@ -545,32 +590,51 @@ namespace LFBetterMusic.Runtime
                 return;
             }
 
-            // 到音频即将真正发声时才取得优先级；加载期间原版 BGM 保持正常。
-            AcquireGameMusicSuppression();
-            if (!TryStartClipWithRecovery(session, clip, out string error))
+            bool startImmediately = !session.PendingPauseAfterLoad;
+            if (startImmediately)
+            {
+                // 到音频即将真正发声时才取得优先级；加载期间原版 BGM 保持正常。
+                AcquireGameMusicSuppression();
+            }
+
+            if (!TryStartClipWithRecovery(session, clip, startImmediately, out string error))
             {
                 FailActiveSession($"插件音乐播放失败：{error}");
                 return;
             }
 
             session.IsLoading = false;
+            ResetLyrics(session);
+
+            if (session.PendingPauseAfterLoad)
+            {
+                session.PendingPauseAfterLoad = false;
+                session.PausedAtSeconds = session.PlaybackStartSeconds;
+                session.IsPlaying = false;
+                session.IsPaused = true;
+                ReleaseGameMusicSuppression();
+                LogPlaybackSuccess(session);
+                Plugin.LogEffectSuccess(
+                    $"音乐已完成加载并直接进入暂停状态；音乐={session.ResolvedAudio?.Name ?? "未知"}" +
+                    $"（ID={session.MusicId}），暂停点={session.PausedAtSeconds:F3}秒。");
+                return;
+            }
+
             session.IsPlaying = true;
             session.IsPaused = false;
-            ResetLyrics(session);
             MaintainGameMusicSuppression();
-
             LogPlaybackSuccess(session);
         }
 
-        private static void LogPlaybackSuccess(BetterMusicSession session)
+        private static void LogPlaybackSuccess(BetterAudioSession session)
         {
             if (session == null || session.Request == null)
             {
                 return;
             }
 
-            BetterMusicEffectRequest request = session.Request;
-            string typeName = request.Scope == BetterMusicPlaybackScope.SingleTalk
+            BetterAudioEffectRequest request = session.Request;
+            string typeName = request.Scope == BetterAudioPlaybackScope.SingleTalk
                 ? request.IsSinging
                     ? "针对单一talk的唱歌型音乐"
                     : "针对单一talk的背景型音乐"
@@ -578,9 +642,9 @@ namespace LFBetterMusic.Runtime
                     ? "针对背景的唱歌型音乐"
                     : "针对背景的背景型音乐";
 
-            string musicName = session.ResolvedMusic != null &&
-                               !string.IsNullOrWhiteSpace(session.ResolvedMusic.Name)
-                ? session.ResolvedMusic.Name
+            string musicName = session.ResolvedAudio != null &&
+                               !string.IsNullOrWhiteSpace(session.ResolvedAudio.Name)
+                ? session.ResolvedAudio.Name
                 : "未知音乐";
 
             string detail =
@@ -594,6 +658,12 @@ namespace LFBetterMusic.Runtime
             else
             {
                 detail += $"；歌词颜色={FormatLyricColor(request)}";
+                if (request.UsesRepeatCount)
+                {
+                    detail += request.RepeatCount == 0
+                        ? "；播放次数=无限循环"
+                        : $"；播放次数={request.RepeatCount}次";
+                }
             }
 
             if (request.HasStartLine)
@@ -629,25 +699,20 @@ namespace LFBetterMusic.Runtime
             }
         }
 
-        private static string FormatLyricColor(BetterMusicEffectRequest request)
+        private static string FormatLyricColor(BetterAudioEffectRequest request)
         {
             if (request == null || !request.ShowLyrics)
             {
                 return "不显示歌词";
             }
 
-            string[] names =
-            {
-                "白色", "红色", "橙红色", "橙色", "橙黄色", "黄色",
-                "黄绿色", "绿色", "蓝绿色", "蓝色", "蓝紫色", "紫色", "紫红色"
-            };
-            int index = Mathf.Clamp(request.LyricColorMode, 0, names.Length - 1);
-            return $"{request.LyricColorMode}（{names[index]}）";
+            int colorId = TimelineColorPalette.NormalizeAuthorColorId(request.LyricColorMode);
+            return $"{colorId}（{TimelineColorPalette.GetName(colorId)}）";
         }
 
-        private static string FormatSingingRoles(BetterMusicSession session)
+        private static string FormatSingingRoles(BetterAudioSession session)
         {
-            BetterMusicEffectRequest request = session?.Request;
+            BetterAudioEffectRequest request = session?.Request;
             if (request?.SingerRoleIds == null || request.SingerRoleIds.Count == 0)
             {
                 return "未指定，按合唱处理";
@@ -686,7 +751,7 @@ namespace LFBetterMusic.Runtime
         }
 
         private static bool ConfigurePlaybackWindow(
-            BetterMusicSession session,
+            BetterAudioSession session,
             AudioClip clip,
             out string error)
         {
@@ -696,7 +761,7 @@ namespace LFBetterMusic.Runtime
             session.HasPlaybackEndBoundary = false;
             session.UsesManualSegmentLoop = false;
 
-            BetterMusicEffectRequest request = session.Request;
+            BetterAudioEffectRequest request = session.Request;
             if (request == null || (!request.HasStartLine && !request.HasEndLine))
             {
                 return true;
@@ -788,8 +853,9 @@ namespace LFBetterMusic.Runtime
         }
 
         private bool TryStartClipWithRecovery(
-            BetterMusicSession session,
+            BetterAudioSession session,
             AudioClip clip,
+            bool startImmediately,
             out string error)
         {
             error = null;
@@ -812,13 +878,16 @@ namespace LFBetterMusic.Runtime
                 {
                     source.Stop();
                     source.clip = clip;
-                    source.volume = session.ResolvedMusic.Volume;
+                    source.volume = session.ResolvedAudio.Volume;
                     source.loop = session.ShouldLoop && !session.UsesManualSegmentLoop;
                     source.time = Mathf.Clamp(
                         session.PlaybackStartSeconds,
                         0f,
                         Mathf.Max(0f, clip.length - 0.01f));
-                    source.Play();
+                    if (startImmediately)
+                    {
+                        source.Play();
+                    }
                     _audioSource = source;
                     return true;
                 }
@@ -888,29 +957,29 @@ namespace LFBetterMusic.Runtime
 
         internal bool HandleNextTalkAttempt(BaseView owner)
         {
-            BetterMusicSession session = _session;
+            BetterAudioSession session = _session;
+            TalkAdvanceOrigin origin = GetAdvanceOrigin(owner);
+
             if (session != null && !session.IsCancelled &&
                 session.BlocksBackgroundAutomaticAdvance)
             {
-                TalkAdvanceOrigin backgroundOrigin = GetAdvanceOrigin(owner);
                 session.OwnerView = owner;
-                if (backgroundOrigin == TalkAdvanceOrigin.Automatic)
+                if (origin == TalkAdvanceOrigin.Automatic)
                 {
-                    session.PendingAdvanceOrigin = backgroundOrigin;
+                    session.PendingAdvanceOrigin = origin;
                     return false;
                 }
 
                 // 玩家手动推进或快进时不应遗留旧的自动推进请求。
                 session.PendingAdvanceOrigin = TalkAdvanceOrigin.None;
-                return true;
+                return HandleSoundEffectAdvanceGate(owner, origin);
             }
 
             if (!IsBlockingSingleTalkSession(session, owner))
             {
-                return true;
+                return HandleSoundEffectAdvanceGate(owner, origin);
             }
 
-            TalkAdvanceOrigin origin = GetAdvanceOrigin(owner);
             if (origin == TalkAdvanceOrigin.FastForward)
             {
                 // 只在实际快进尝试到达最终推进入口时复位一次，不逐帧接管 timeScale。
@@ -936,7 +1005,7 @@ namespace LFBetterMusic.Runtime
                     if (origin == TalkAdvanceOrigin.Manual)
                     {
                         BeginTransitionTail(session);
-                        return true;
+                        return HandleSoundEffectAdvanceGate(owner, origin);
                     }
 
                     session.PendingAdvanceOrigin = origin;
@@ -946,7 +1015,7 @@ namespace LFBetterMusic.Runtime
                     if (origin == TalkAdvanceOrigin.Manual || origin == TalkAdvanceOrigin.System)
                     {
                         BeginTransitionTail(session);
-                        return true;
+                        return HandleSoundEffectAdvanceGate(owner, origin);
                     }
 
                     return false;
@@ -959,11 +1028,11 @@ namespace LFBetterMusic.Runtime
                     return false;
 
                 default:
-                    return true;
+                    return HandleSoundEffectAdvanceGate(owner, origin);
             }
         }
 
-        private void BeginTransitionTail(BetterMusicSession session)
+        private void BeginTransitionTail(BetterAudioSession session)
         {
             if (session == null || session.IsCancelled || session.IsTransitionTail)
             {
@@ -979,11 +1048,12 @@ namespace LFBetterMusic.Runtime
 
         internal bool ShouldTrackAutomaticAdvance(BaseView owner)
         {
-            BetterMusicSession session = _session;
+            BetterAudioSession session = _session;
             return IsBlockingSingleTalkSession(session, owner) ||
                    (session != null && !session.IsCancelled &&
                     session.BlocksBackgroundAutomaticAdvance &&
-                    ReferenceEquals(session.OwnerView, owner));
+                    ReferenceEquals(session.OwnerView, owner)) ||
+                   ShouldTrackSoundEffectAutomaticAdvance(owner);
         }
 
         internal bool ShouldBlockFastForward(BaseView owner)
@@ -1001,7 +1071,8 @@ namespace LFBetterMusic.Runtime
             int newTalkId,
             bool deferSingleTalkEndUntilTextStart)
         {
-            BetterMusicSession session = _session;
+            BeforeSoundEffectTalkRefresh(owner, newTalkId);
+            BetterAudioSession session = _session;
             if (!IsOwnedSingleTalkSession(session, owner) || session.TalkId == newTalkId)
             {
                 return;
@@ -1019,7 +1090,7 @@ namespace LFBetterMusic.Runtime
 
         internal void FinalizeTextStart(BaseView owner, int currentTalkId)
         {
-            BetterMusicSession session = _session;
+            BetterAudioSession session = _session;
             if (IsOwnedSingleTalkSession(session, owner) && session.TalkId != currentTalkId)
             {
                 EndActiveSessionInternal("新 Talk 开始且没有可用的新 1163 会话", true, true, false);
@@ -1028,9 +1099,10 @@ namespace LFBetterMusic.Runtime
 
         internal void AfterTalkRefresh(BaseView owner, int newTalkId)
         {
-            BetterMusicSession session = _session;
+            AfterSoundEffectTalkRefresh(owner, newTalkId);
+            BetterAudioSession session = _session;
             if (session == null || session.IsCancelled ||
-                session.Scope != BetterMusicPlaybackScope.Background)
+                session.Scope != BetterAudioPlaybackScope.Background)
             {
                 return;
             }
@@ -1042,7 +1114,8 @@ namespace LFBetterMusic.Runtime
 
         internal void CleanupForView(BaseView owner, string reason)
         {
-            BetterMusicSession session = _session;
+            CleanupSoundEffectsForView(owner, reason);
+            BetterAudioSession session = _session;
             if (session == null)
             {
                 ClearHoldState(owner);
@@ -1053,7 +1126,7 @@ namespace LFBetterMusic.Runtime
             {
                 EndActiveSessionInternal(reason, true, true, false);
             }
-            else if (session.Scope == BetterMusicPlaybackScope.Background &&
+            else if (session.Scope == BetterAudioPlaybackScope.Background &&
                      ReferenceEquals(session.OwnerView, owner))
             {
                 session.OwnerView = null;
@@ -1135,7 +1208,7 @@ namespace LFBetterMusic.Runtime
             _holdToSkipOverlay?.Hide();
         }
 
-        private void CompleteOneShot(BetterMusicSession session)
+        private void CompleteOneShot(BetterAudioSession session)
         {
             if (_session == null || !ReferenceEquals(_session, session) || session.IsCancelled)
             {
@@ -1150,13 +1223,17 @@ namespace LFBetterMusic.Runtime
 
             if (pending != TalkAdvanceOrigin.None && IsOwnerAlive(owner))
             {
-                ContinueAdvance(owner, pending, minimumAdvanceAt);
+                ContinueAdvanceWhenAllAudioReady(owner, pending, minimumAdvanceAt);
+            }
+            else
+            {
+                TryContinuePendingAudioAdvance();
             }
         }
 
         private void FailActiveSession(string reason)
         {
-            BetterMusicSession session = _session;
+            BetterAudioSession session = _session;
             BaseView owner = session?.OwnerView;
             TalkAdvanceOrigin pending = session?.PendingAdvanceOrigin ?? TalkAdvanceOrigin.None;
             float minimumAdvanceAt = session?.MinimumAdvanceAt ?? 0f;
@@ -1166,7 +1243,11 @@ namespace LFBetterMusic.Runtime
 
             if (pending != TalkAdvanceOrigin.None && IsOwnerAlive(owner))
             {
-                ContinueAdvance(owner, pending, minimumAdvanceAt);
+                ContinueAdvanceWhenAllAudioReady(owner, pending, minimumAdvanceAt);
+            }
+            else
+            {
+                TryContinuePendingAudioAdvance();
             }
         }
 
@@ -1253,59 +1334,107 @@ namespace LFBetterMusic.Runtime
             }
         }
 
-        private void PauseActiveMusic()
+        private void PauseActiveMusic(bool useFade)
         {
-            BetterMusicSession session = _session;
-            if (session == null || session.IsCancelled || session.IsLoading ||
-                session.IsPaused || !session.IsPlaying)
+            BetterAudioSession session = _session;
+            string command = useFade ? "1163,99,10" : "1163,99,1";
+            if (session == null || session.IsCancelled || session.IsPaused)
             {
-                Plugin.LogEffectError("1163,99,1 暂停失败：当前没有正在播放的插件音乐。");
+                Plugin.LogEffectError($"{command} 暂停失败：当前没有正在播放的插件音乐。");
+                return;
+            }
+
+            // 同一 Talk 中“播放 -> 暂停”按 EFFECT 顺序执行。若音频尚未加载，
+            // 不再把暂停判为失败，而是登记为加载完成后直接暂停。
+            if (session.IsLoading)
+            {
+                session.PendingPauseAfterLoad = true;
+                Plugin.LogEffectSuccess(
+                    $"已登记加载完成后直接暂停；音乐 ID={session.MusicId}。");
+                return;
+            }
+
+            if (!session.IsPlaying)
+            {
+                Plugin.LogEffectError($"{command} 暂停失败：当前没有正在播放的插件音乐。");
                 return;
             }
 
             AudioSource source = GetUsableAudioSource();
             if (source == null || source.clip == null)
             {
-                Plugin.LogEffectError("1163,99,1 暂停失败：插件 AudioSource 或音频已失效。");
+                Plugin.LogEffectError($"{command} 暂停失败：插件 AudioSource 或音频已失效。");
                 return;
             }
 
             try
             {
-                session.PausedAtSeconds = source.time;
-                source.Pause();
-                session.IsPaused = true;
-                session.IsPlaying = false;
-                _lyricsOverlay?.Clear();
-                ReleaseGameMusicSuppression();
-                Plugin.LogEffectSuccess(
-                    $"已暂停插件音乐；音乐={session.ResolvedMusic?.Name ?? "未知"}" +
-                    $"（ID={session.MusicId}），暂停点={session.PausedAtSeconds:F3}秒。");
+                if (useFade)
+                {
+                    StartVolumeFade(
+                        session,
+                        source,
+                        BetterAudioVolumeFadeKind.FadeOutPause,
+                        source.volume,
+                        0f,
+                        PauseFadeDurationSeconds);
+                    Plugin.LogEffectSuccess(
+                        $"已开始淡出暂停；音乐={session.ResolvedAudio?.Name ?? "未知"}" +
+                        $"（ID={session.MusicId}），淡出时长={PauseFadeDurationSeconds:F2}秒。");
+                    return;
+                }
+
+                CancelVolumeFade(false);
+                CompletePause(session, source, "已暂停插件音乐");
             }
             catch (Exception ex)
             {
-                Plugin.LogEffectError($"1163,99,1 暂停失败：{ex.Message}");
+                Plugin.LogEffectError($"{command} 暂停失败：{ex.Message}");
             }
         }
 
-        private void ResumeActiveMusic()
+        private void ResumeActiveMusic(bool useFade)
         {
-            BetterMusicSession session = _session;
-            if (session == null || session.IsCancelled || !session.IsPaused)
+            BetterAudioSession session = _session;
+            string command = useFade ? "1163,99,20" : "1163,99,2";
+            if (session == null || session.IsCancelled)
             {
-                Plugin.LogEffectError("1163,99,2 恢复失败：当前没有已暂停的插件音乐。");
+                Plugin.LogEffectError($"{command} 恢复失败：当前没有已暂停的插件音乐。");
+                return;
+            }
+
+            // 加载尚未完成时，恢复指令可以撤销此前登记的 PendingPauseAfterLoad，
+            // 从而保证同一 EFFECT 批次严格按出现顺序得到确定结果。
+            if (session.IsLoading)
+            {
+                if (session.PendingPauseAfterLoad)
+                {
+                    session.PendingPauseAfterLoad = false;
+                    Plugin.LogEffectSuccess(
+                        $"已取消加载完成后的暂停；音乐 ID={session.MusicId} 将在加载后正常播放。");
+                    return;
+                }
+
+                Plugin.LogEffectError($"{command} 恢复失败：音乐仍在加载且未处于暂停状态。");
+                return;
+            }
+
+            if (!session.IsPaused)
+            {
+                Plugin.LogEffectError($"{command} 恢复失败：当前没有已暂停的插件音乐。");
                 return;
             }
 
             AudioSource source = GetUsableAudioSource();
             if (source == null || source.clip == null)
             {
-                Plugin.LogEffectError("1163,99,2 恢复失败：插件 AudioSource 或音频已失效。");
+                Plugin.LogEffectError($"{command} 恢复失败：插件 AudioSource 或音频已失效。");
                 return;
             }
 
             try
             {
+                CancelVolumeFade(false);
                 AcquireGameMusicSuppression();
 
                 float maxTime = session.HasPlaybackEndBoundary
@@ -1316,23 +1445,153 @@ namespace LFBetterMusic.Runtime
                 {
                     resumeTime = session.PlaybackStartSeconds;
                 }
+
                 source.time = Mathf.Clamp(resumeTime, session.PlaybackStartSeconds, maxTime);
                 source.loop = session.ShouldLoop && !session.UsesManualSegmentLoop;
+                float targetVolume = GetSessionTargetVolume(session);
+                source.volume = useFade ? 0f : targetVolume;
                 source.Play();
 
                 session.IsPaused = false;
                 session.IsPlaying = true;
                 ResetLyrics(session);
                 MaintainGameMusicSuppression();
-                Plugin.LogEffectSuccess(
-                    $"已恢复插件音乐；音乐={session.ResolvedMusic?.Name ?? "未知"}" +
-                    $"（ID={session.MusicId}），恢复点={source.time:F3}秒。");
+
+                if (useFade)
+                {
+                    StartVolumeFade(
+                        session,
+                        source,
+                        BetterAudioVolumeFadeKind.FadeInResume,
+                        0f,
+                        targetVolume,
+                        PauseFadeDurationSeconds);
+                    Plugin.LogEffectSuccess(
+                        $"已从暂停点淡入恢复；音乐={session.ResolvedAudio?.Name ?? "未知"}" +
+                        $"（ID={session.MusicId}），恢复点={source.time:F3}秒，" +
+                        $"淡入时长={PauseFadeDurationSeconds:F2}秒。");
+                }
+                else
+                {
+                    Plugin.LogEffectSuccess(
+                        $"已恢复插件音乐；音乐={session.ResolvedAudio?.Name ?? "未知"}" +
+                        $"（ID={session.MusicId}），恢复点={source.time:F3}秒。");
+                }
             }
             catch (Exception ex)
             {
+                CancelVolumeFade(false);
                 ReleaseGameMusicSuppression();
-                Plugin.LogEffectError($"1163,99,2 恢复失败：{ex.Message}");
+                Plugin.LogEffectError($"{command} 恢复失败：{ex.Message}");
             }
+        }
+
+        private void StartVolumeFade(
+            BetterAudioSession session,
+            AudioSource source,
+            BetterAudioVolumeFadeKind kind,
+            float from,
+            float to,
+            float duration)
+        {
+            CancelVolumeFade(false);
+            _volumeFadeKind = kind;
+            _volumeFadeSessionToken = session.Token;
+            _volumeFadeStartedAt = Time.unscaledTime;
+            _volumeFadeDuration = Mathf.Max(0.01f, duration);
+            _volumeFadeFrom = Mathf.Max(0f, from);
+            _volumeFadeTo = Mathf.Max(0f, to);
+            source.volume = _volumeFadeFrom;
+        }
+
+        private void ProcessVolumeFade()
+        {
+            if (_volumeFadeKind == BetterAudioVolumeFadeKind.None)
+            {
+                return;
+            }
+
+            BetterAudioSession session = _session;
+            AudioSource source = GetUsableAudioSource();
+            if (session == null || session.IsCancelled ||
+                session.Token != _volumeFadeSessionToken ||
+                source == null || source.clip == null)
+            {
+                ClearVolumeFadeState();
+                return;
+            }
+
+            float progress = Mathf.Clamp01(
+                (Time.unscaledTime - _volumeFadeStartedAt) / _volumeFadeDuration);
+            float smoothed = Mathf.SmoothStep(0f, 1f, progress);
+            source.volume = Mathf.Lerp(_volumeFadeFrom, _volumeFadeTo, smoothed);
+            if (progress < 1f)
+            {
+                return;
+            }
+
+            BetterAudioVolumeFadeKind completedKind = _volumeFadeKind;
+            ClearVolumeFadeState();
+            if (completedKind == BetterAudioVolumeFadeKind.FadeOutPause)
+            {
+                CompletePause(session, source, "已淡出并暂停插件音乐");
+            }
+            else
+            {
+                source.volume = GetSessionTargetVolume(session);
+            }
+        }
+
+        private void CompletePause(
+            BetterAudioSession session,
+            AudioSource source,
+            string actionText)
+        {
+            if (session == null || source == null)
+            {
+                return;
+            }
+
+            session.PausedAtSeconds = source.time;
+            source.Pause();
+            // 保留目标音量，确保之后使用立即恢复时不会以 0 音量继续播放。
+            source.volume = GetSessionTargetVolume(session);
+            session.IsPaused = true;
+            session.IsPlaying = false;
+            _lyricsOverlay?.Clear();
+            ReleaseGameMusicSuppression();
+            Plugin.LogEffectSuccess(
+                $"{actionText}；音乐={session.ResolvedAudio?.Name ?? "未知"}" +
+                $"（ID={session.MusicId}），暂停点={session.PausedAtSeconds:F3}秒。");
+        }
+
+        private void CancelVolumeFade(bool restoreTargetVolume)
+        {
+            if (restoreTargetVolume && _session != null)
+            {
+                AudioSource source = GetUsableAudioSource();
+                if (source != null)
+                {
+                    source.volume = GetSessionTargetVolume(_session);
+                }
+            }
+
+            ClearVolumeFadeState();
+        }
+
+        private void ClearVolumeFadeState()
+        {
+            _volumeFadeKind = BetterAudioVolumeFadeKind.None;
+            _volumeFadeSessionToken = 0;
+            _volumeFadeStartedAt = 0f;
+            _volumeFadeDuration = 0f;
+            _volumeFadeFrom = 0f;
+            _volumeFadeTo = 0f;
+        }
+
+        private static float GetSessionTargetVolume(BetterAudioSession session)
+        {
+            return Mathf.Clamp01(session?.ResolvedAudio?.Volume ?? 1f);
         }
 
         private void StopAndRefreshChannel(string reason)
@@ -1343,8 +1602,11 @@ namespace LFBetterMusic.Runtime
             }
             _session = null;
             ++_tokenCounter;
+            CancelVolumeFade(false);
 
             StopAndClearPluginSource();
+            StopAllSoundEffects(reason);
+            ClearPendingAudioAdvance(null);
             _lyricsOverlay?.Destroy();
             _holdToSkipOverlay?.Destroy();
             _holdToSkipOverlay = new HoldToSkipOverlay();
@@ -1354,16 +1616,16 @@ namespace LFBetterMusic.Runtime
             ReleaseGameMusicSuppression();
             InvalidateAudioSource(reason);
 
-            Plugin.LogEffectSuccess("已停止并刷新插件音乐播放通道。");
+            Plugin.LogEffectSuccess("已停止并刷新插件音乐与音效播放通道。");
         }
 
-        private BetterMusicSession EndActiveSessionInternal(
+        private BetterAudioSession EndActiveSessionInternal(
             string reason,
             bool clearLyrics,
             bool restoreGameMusic,
             bool resetPluginChannel)
         {
-            BetterMusicSession oldSession = _session;
+            BetterAudioSession oldSession = _session;
             if (oldSession != null)
             {
                 oldSession.IsCancelled = true;
@@ -1371,6 +1633,7 @@ namespace LFBetterMusic.Runtime
                 ++_tokenCounter;
             }
 
+            CancelVolumeFade(false);
             StopAndClearPluginSource();
 
             if (clearLyrics)
@@ -1397,6 +1660,8 @@ namespace LFBetterMusic.Runtime
         public void Shutdown()
         {
             EndActiveSessionInternal("Shutdown", true, true, false);
+            StopAllSoundEffects("Shutdown");
+            ClearPendingAudioAdvance(null);
             ClearScheduledAdvance();
             _audioClipWaiters.Clear();
             _audioClipCache.Clear();
@@ -1411,14 +1676,40 @@ namespace LFBetterMusic.Runtime
         }
 
         private static bool HasReachedPlaybackEnd(
-            BetterMusicSession session,
+            BetterAudioSession session,
             AudioSource source)
         {
             return session.HasPlaybackEndBoundary &&
                    source.time >= session.PlaybackEndSeconds - 0.01f;
         }
 
-        private void RestartLoop(BetterMusicSession session, AudioSource source)
+        private void HandlePlaybackEnded(BetterAudioSession session, AudioSource source)
+        {
+            if (_session == null || !ReferenceEquals(_session, session) || session.IsCancelled)
+            {
+                return;
+            }
+
+            if (session.ShouldLoop)
+            {
+                RestartLoop(session, source);
+                return;
+            }
+
+            if (session.UsesRepeatCount && session.RepeatCount > 0)
+            {
+                session.CompletedPlayCount++;
+                if (session.CompletedPlayCount < session.RepeatCount)
+                {
+                    RestartLoop(session, source);
+                    return;
+                }
+            }
+
+            CompleteOneShot(session);
+        }
+
+        private void RestartLoop(BetterAudioSession session, AudioSource source)
         {
             if (_session == null || !ReferenceEquals(_session, session) || session.IsPaused)
             {
@@ -1434,7 +1725,7 @@ namespace LFBetterMusic.Runtime
             source.Play();
         }
 
-        private void UpdateLyrics(BetterMusicSession session, AudioSource source)
+        private void UpdateLyrics(BetterAudioSession session, AudioSource source)
         {
             if (!session.ShowLyrics || session.Lyrics == null || session.Lyrics.Count == 0)
             {
@@ -1448,30 +1739,33 @@ namespace LFBetterMusic.Runtime
             }
             session.LastPlaybackTime = currentTime;
 
-            int nextIndex = session.LyricIndex;
-            while (nextIndex + 1 < session.Lyrics.Count &&
-                   session.Lyrics[nextIndex + 1].TimeSeconds <= currentTime + 0.01f)
-            {
-                nextIndex++;
-            }
-
+            int nextIndex = FindLyricIndexAtTime(session.Lyrics, currentTime);
             if (nextIndex == session.LyricIndex)
             {
                 return;
             }
 
             session.LyricIndex = nextIndex;
-            if (nextIndex < 0)
+            RenderLyricAtIndex(session, nextIndex, true);
+        }
+
+        private void RenderLyricAtIndex(
+            BetterAudioSession session,
+            int lyricIndex,
+            bool animate)
+        {
+            if (session == null || lyricIndex < 0 ||
+                session.Lyrics == null || lyricIndex >= session.Lyrics.Count)
             {
                 _lyricsOverlay?.Clear();
                 return;
             }
 
-            LrcLine line = session.Lyrics[nextIndex];
+            LrcLine line = session.Lyrics[lyricIndex];
             if (!session.IsSinging)
             {
                 // 背景型音乐会正确识别 idN 和双语 LRC，但忽略演唱角色语义。
-                _lyricsOverlay?.ShowLine(line, null, -1);
+                _lyricsOverlay?.ShowLine(line, null, -1, animate);
                 return;
             }
 
@@ -1486,17 +1780,34 @@ namespace LFBetterMusic.Runtime
             _lyricsOverlay?.ShowLine(
                 line,
                 singer.Name,
-                singer.InternalColorMode);
+                singer.InternalColorMode,
+                animate);
         }
 
-        private void ResetLyrics(BetterMusicSession session)
+        private static int FindLyricIndexAtTime(IList<LrcLine> lyrics, float currentTime)
+        {
+            if (lyrics == null || lyrics.Count == 0)
+            {
+                return -1;
+            }
+
+            int index = -1;
+            while (index + 1 < lyrics.Count &&
+                   lyrics[index + 1].TimeSeconds <= currentTime + 0.01f)
+            {
+                index++;
+            }
+            return index;
+        }
+
+        private void ResetLyrics(BetterAudioSession session)
         {
             session.LyricIndex = -1;
             session.LastPlaybackTime = -1f;
             _lyricsOverlay?.Clear();
         }
 
-        private void AttachLyricsIfPossible(BetterMusicSession session, BaseView owner)
+        private void AttachLyricsIfPossible(BetterAudioSession session, BaseView owner)
         {
             if (session == null || !session.ShowLyrics ||
                 session.Lyrics == null || session.Lyrics.Count == 0)
@@ -1512,16 +1823,36 @@ namespace LFBetterMusic.Runtime
                     session.LyricsUiState = new FloatingLyricsRuntimeState(
                         session.LyricSizeMode,
                         session.LyricColorMode,
-                        session.IsSinging);
+                        session.IsSinging,
+                        _lyricsPositionLockState);
                 }
 
+                int previousIndex = session.LyricIndex;
                 _lyricsOverlay?.Attach(
                     talkUi,
                     session.LyricsUiState);
 
-                // 背景音乐跨 Talk 重建歌词控件后，需要按当前播放时间重新定位歌词。
-                session.LyricIndex = -1;
-                session.LastPlaybackTime = -1f;
+                // 暂停或加载状态按原设计不显示歌词。播放中的背景会话跨 Talk 时，
+                // 同一句歌词无动画恢复；只有确实跨入下一句时才保留浮动淡入动画。
+                if (session.IsLoading || session.IsPaused || !session.IsPlaying)
+                {
+                    return;
+                }
+
+                AudioSource source = GetUsableAudioSource();
+                if (source == null || source.clip == null)
+                {
+                    return;
+                }
+
+                float currentTime = source.time;
+                int currentIndex = FindLyricIndexAtTime(session.Lyrics, currentTime);
+                session.LyricIndex = currentIndex;
+                session.LastPlaybackTime = currentTime;
+                RenderLyricAtIndex(
+                    session,
+                    currentIndex,
+                    currentIndex != previousIndex);
             }
             else
             {
@@ -1675,7 +2006,7 @@ namespace LFBetterMusic.Runtime
 
             try
             {
-                _audioObject = new GameObject("lf-BetterMusicAudioSource");
+                _audioObject = new GameObject("lf-BetterAudioAudioSource");
                 DontDestroyOnLoad(_audioObject);
                 _audioSource = _audioObject.AddComponent<AudioSource>();
                 _audioSource.playOnAwake = false;
@@ -1774,16 +2105,16 @@ namespace LFBetterMusic.Runtime
         }
 
         private static bool IsOwnedSingleTalkSession(
-            BetterMusicSession session,
+            BetterAudioSession session,
             BaseView owner)
         {
             return session != null && !session.IsCancelled &&
-                   session.Scope == BetterMusicPlaybackScope.SingleTalk &&
+                   session.Scope == BetterAudioPlaybackScope.SingleTalk &&
                    ReferenceEquals(session.OwnerView, owner);
         }
 
         private static bool IsBlockingSingleTalkSession(
-            BetterMusicSession session,
+            BetterAudioSession session,
             BaseView owner)
         {
             return IsOwnedSingleTalkSession(session, owner) &&
@@ -1795,7 +2126,7 @@ namespace LFBetterMusic.Runtime
             return owner != null && owner.gameObject != null && owner.gameObject.activeInHierarchy;
         }
 
-        private static bool IsControllerUsable(BetterMusicController controller)
+        private static bool IsControllerUsable(BetterAudioController controller)
         {
             if (controller == null)
             {
@@ -1823,8 +2154,8 @@ namespace LFBetterMusic.Runtime
         {
             try
             {
-                if (_session != null || _gameMusicSuppressionHeld ||
-                    _audioSource != null || _audioObject != null)
+                if (_session != null || _soundEffectSessions.Count > 0 ||
+                    _gameMusicSuppressionHeld || _audioSource != null || _audioObject != null)
                 {
                     Shutdown();
                 }

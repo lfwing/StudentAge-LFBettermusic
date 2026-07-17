@@ -1,12 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
-    <AssemblyName>LFBetterMusicPlugin</AssemblyName>
-    <RootNamespace>LFBetterMusic</RootNamespace>
+    <AssemblyName>LFBetterAudio</AssemblyName>
+    <RootNamespace>LFBetterAudio</RootNamespace>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>1.6.2</Version>
+    <Version>1.0.0</Version>
     <GameDir Condition="'$(GameDir)' == ''">$(STUDENTAGE_GAME_DIR)</GameDir>
     <GameManagedDir>$(GameDir)\StudentAge_Data\Managed</GameManagedDir>
     <BepInExDir>$(GameDir)\BepInEx</BepInExDir>
@@ -16,16 +16,16 @@
   </PropertyGroup>
 
   <!--
-    授权构建时，可把校验音乐与 LRC 作为 EmbeddedResource 打进 DLL。
-    运行时释放到 BepInEx cache/LFBetterMusic/RuntimeAssets，不写入 plugins/Bettermusic 模板目录。
+    授权构建时，可把校验音频与 Timeline 作为 EmbeddedResource 打进 DLL。
+    运行时释放到 BepInEx cache/LFBetterAudio/RuntimeAssets，不写入 plugins/BetterAudio 模板目录。
     若文件不存在，项目仍可编译，1163001 会使用代码生成的原创短校验音作为后备。
   -->
   <ItemGroup>
-    <EmbeddedResource Include="BundledAssets\ValidationMusic.mp3" Condition="Exists('$(ProjectDir)BundledAssets\ValidationMusic.mp3')">
-      <LogicalName>LFBetterMusic.BundledAssets.ValidationMusic.mp3</LogicalName>
+    <EmbeddedResource Include="BundledAssets\ValidationAudio.mp3" Condition="Exists('$(ProjectDir)BundledAssets\ValidationAudio.mp3')">
+      <LogicalName>LFBetterAudio.BundledAssets.ValidationAudio.mp3</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="BundledAssets\ValidationLyrics.lrc" Condition="Exists('$(ProjectDir)BundledAssets\ValidationLyrics.lrc')">
-      <LogicalName>LFBetterMusic.BundledAssets.ValidationLyrics.lrc</LogicalName>
+    <EmbeddedResource Include="BundledAssets\ValidationTimeline.lrc" Condition="Exists('$(ProjectDir)BundledAssets\ValidationTimeline.lrc')">
+      <LogicalName>LFBetterAudio.BundledAssets.ValidationTimeline.lrc</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 
